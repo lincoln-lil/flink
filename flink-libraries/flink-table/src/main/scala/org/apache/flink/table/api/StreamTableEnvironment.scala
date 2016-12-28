@@ -21,7 +21,7 @@ package org.apache.flink.table.api
 import _root_.java.util.concurrent.atomic.AtomicInteger
 
 import org.apache.calcite.plan.RelOptPlanner.CannotPlanException
-import org.apache.calcite.plan.RelOptUtil
+import org.apache.calcite.plan.{RelOptCostFactory, RelOptUtil}
 import org.apache.calcite.rel.RelNode
 import org.apache.calcite.sql2rel.RelDecorrelator
 import org.apache.calcite.tools.{Programs, RuleSet}
@@ -32,6 +32,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment
 import org.apache.flink.table.calcite.FlinkPlannerImpl
 import org.apache.flink.table.explain.PlanJsonParser
 import org.apache.flink.table.expressions.Expression
+import org.apache.flink.table.plan.cost.DataStreamCost
 import org.apache.flink.table.plan.logical.{CatalogNode, LogicalRelNode}
 import org.apache.flink.table.plan.nodes.datastream.{DataStreamConvention, DataStreamRel}
 import org.apache.flink.table.plan.rules.FlinkRuleSets
@@ -152,10 +153,11 @@ abstract class StreamTableEnvironment(
     * @param name        The name under which the [[StreamTableSource]] is registered.
     * @param tableSource The [[org.apache.flink.table.sources.StreamTableSource]] to register.
     */
-  def registerTableSource(name: String, tableSource: StreamTableSource[_]): Unit = {
+  def registerTableSource(name: String, tableSource: StreamTableSource[_]): Table = {
 
     checkValidTableName(name)
     registerTableInternal(name, new TableSourceTable(tableSource))
+    ingest(name)
   }
 
   /**
@@ -349,4 +351,8 @@ abstract class StreamTableEnvironment(
         s"$sqlPlan"
   }
 
+  /**
+    * Returns DataStreamCostFactory
+    */
+  override def getCostFactory: RelOptCostFactory = DataStreamCost.FACTORY
 }

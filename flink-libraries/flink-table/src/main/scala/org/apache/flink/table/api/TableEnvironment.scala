@@ -22,7 +22,7 @@ import _root_.java.util.concurrent.atomic.AtomicInteger
 import _root_.java.lang.reflect.Modifier
 
 import org.apache.calcite.config.Lex
-import org.apache.calcite.plan.RelOptPlanner
+import org.apache.calcite.plan.{RelOptCostFactory, RelOptPlanner}
 import org.apache.calcite.rel.`type`.RelDataType
 import org.apache.calcite.schema.SchemaPlus
 import org.apache.calcite.schema.impl.AbstractTable
@@ -44,7 +44,6 @@ import org.apache.flink.table.codegen.ExpressionReducer
 import org.apache.flink.table.expressions.{Alias, Expression, UnresolvedFieldReference}
 import org.apache.flink.table.functions.utils.UserDefinedFunctionUtils.{checkForInstantiation, checkNotSingleton, createScalarSqlFunction, createTableSqlFunctions}
 import org.apache.flink.table.functions.{ScalarFunction, TableFunction}
-import org.apache.flink.table.plan.cost.DataSetCostFactory
 import org.apache.flink.table.plan.schema.RelTable
 import org.apache.flink.table.sinks.TableSink
 import org.apache.flink.table.validate.FunctionCatalog
@@ -59,7 +58,7 @@ import _root_.scala.collection.JavaConverters._
 abstract class TableEnvironment(val config: TableConfig) {
 
   // the catalog to hold all registered and translated tables
-  private val tables: SchemaPlus = Frameworks.createRootSchema(true)
+  private[flink] val tables: SchemaPlus = Frameworks.createRootSchema(true)
 
   // Table API/SQL function catalog
   private val functionCatalog: FunctionCatalog = FunctionCatalog.withBuiltIns
@@ -69,7 +68,7 @@ abstract class TableEnvironment(val config: TableConfig) {
     .newConfigBuilder
     .defaultSchema(tables)
     .parserConfig(getSqlParserConfig)
-    .costFactory(new DataSetCostFactory)
+    .costFactory(getCostFactory)
     .typeSystem(new FlinkTypeSystem)
     .operatorTable(getSqlOperatorTable)
     // set the executor to evaluate constant expressions
@@ -89,6 +88,11 @@ abstract class TableEnvironment(val config: TableConfig) {
 
   /** Returns the table config to define the runtime behavior of the Table API. */
   def getConfig = config
+
+  /**
+    * Returns the costFactory that are defined by the environment.
+    */
+  def getCostFactory: RelOptCostFactory
 
   /**
     * Returns the operator table for this environment including a custom Calcite configuration.

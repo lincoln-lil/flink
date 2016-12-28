@@ -156,7 +156,12 @@ object FlinkRuleSets {
       DataStreamValuesRule.INSTANCE,
       DataStreamCorrelateRule.INSTANCE,
       StreamTableSourceScanRule.INSTANCE,
-      PushProjectIntoStreamTableSourceScanRule.INSTANCE
+      PushProjectIntoStreamTableSourceScanRule.INSTANCE,
+
+      DataStreamJoinRule.INSTANCE,
+      // convert a HBaseTableJoin to a flatMapper
+      DataStreamJoinHTableSourceRule.INSTANCE,
+      StreamTableJoinHTableRule.INSTANCE
   )
 
 }

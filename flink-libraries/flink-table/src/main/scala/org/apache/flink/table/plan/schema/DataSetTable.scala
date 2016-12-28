@@ -34,7 +34,7 @@ class DataSetTable[T](
   extends FlinkTable[T](dataSet.getType, fieldIndexes, fieldNames) {
 
   override def getStatistic: Statistic = {
-    new DefaultDataSetStatistic
+    new DefaultDataStreamStatistic
   }
 
 }

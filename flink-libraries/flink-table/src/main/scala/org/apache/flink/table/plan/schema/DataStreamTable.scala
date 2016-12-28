@@ -18,6 +18,13 @@
 
 package org.apache.flink.table.plan.schema
 
+import java.lang.Double
+import java.util
+import java.util.Collections
+
+import org.apache.calcite.rel.{RelCollation, RelDistribution}
+import org.apache.calcite.schema.Statistic
+import org.apache.calcite.util.ImmutableBitSet
 import org.apache.flink.streaming.api.datastream.DataStream
 
 class DataStreamTable[T](
@@ -25,4 +32,21 @@ class DataStreamTable[T](
     override val fieldIndexes: Array[Int],
     override val fieldNames: Array[String])
   extends FlinkTable[T](dataStream.getType, fieldIndexes, fieldNames) {
+  override def getStatistic: Statistic = {
+    new DefaultDataStreamStatistic
+  }
+
+}
+
+class DefaultDataStreamStatistic extends Statistic {
+
+  // element rate
+//  override def getRowCount: Double = 100d
+  override def getRowCount: Double = 100d
+
+  override def getCollations: util.List[RelCollation] = Collections.emptyList()
+
+  override def isKey(columns: ImmutableBitSet): Boolean = false
+
+  override def getDistribution: RelDistribution = null
 }
