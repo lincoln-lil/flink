@@ -18,6 +18,7 @@
 
 package org.apache.flink.table
 
+import org.apache.calcite.plan.RelOptCostFactory
 import org.apache.calcite.tools.RuleSet
 import org.apache.flink.api.scala._
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo._
@@ -290,6 +291,11 @@ class MockTableEnvironment extends TableEnvironment(new TableConfig) {
   override protected def getBuiltInOptRuleSet: RuleSet = ???
 
   override def registerTableSource(name: String, tableSource: TableSource[_]) = ???
+
+  /**
+    * Returns DataSetCostFactory
+    */
+  override def getCostFactory: RelOptCostFactory = ???
 }
 
 case class CClass(cf1: Int, cf2: String, cf3: Double)

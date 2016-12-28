@@ -20,8 +20,9 @@ package org.apache.flink.table.api
 
 import _root_.java.util.concurrent.atomic.AtomicInteger
 
-import org.apache.calcite.plan.RelOptUtil
 import org.apache.calcite.plan.hep.HepMatchOrder
+import org.apache.calcite.plan.RelOptPlanner.CannotPlanException
+import org.apache.calcite.plan.{RelOptCostFactory, RelOptUtil}
 import org.apache.calcite.rel.RelNode
 import org.apache.calcite.rel.`type`.RelDataType
 import org.apache.calcite.sql2rel.RelDecorrelator
@@ -32,6 +33,8 @@ import org.apache.flink.api.java.typeutils.GenericTypeInfo
 import org.apache.flink.api.java.{DataSet, ExecutionEnvironment}
 import org.apache.flink.table.explain.PlanJsonParser
 import org.apache.flink.table.expressions.Expression
+import org.apache.flink.table.plan.cost.DataSetCost
+import org.apache.flink.table.plan.logical.{CatalogNode, LogicalRelNode}
 import org.apache.flink.table.plan.nodes.dataset.{DataSetConvention, DataSetRel}
 import org.apache.flink.table.plan.rules.FlinkRuleSets
 import org.apache.flink.table.plan.schema.{DataSetTable, TableSourceTable}
@@ -74,8 +77,9 @@ abstract class BatchTableEnvironment(
     val m = internalNamePattern.findFirstIn(name)
     m match {
       case Some(_) =>
-        throw new TableException(s"Illegal Table name. " +
-          s"Please choose a name that does not contain the pattern $internalNamePattern")
+        throw new TableException(
+          s"Illegal Table name. " +
+            s"Please choose a name that does not contain the pattern $internalNamePattern")
       case None =>
     }
   }
@@ -109,7 +113,7 @@ abstract class BatchTableEnvironment(
     * [[TableSink]] to write it.
     *
     * @param table The [[Table]] to write.
-    * @param sink The [[TableSink]] to write the [[Table]] to.
+    * @param sink  The [[TableSink]] to write the [[Table]] to.
     * @tparam T The expected type of the [[DataSet]] which represents the [[Table]].
     */
   override private[flink] def writeToSink[T](table: Table, sink: TableSink[T]): Unit = {
@@ -130,7 +134,7 @@ abstract class BatchTableEnvironment(
     * Returns the AST of the specified Table API and SQL queries and the execution plan to compute
     * the result of the given [[Table]].
     *
-    * @param table The table for which the AST and execution plan will be returned.
+    * @param table    The table for which the AST and execution plan will be returned.
     * @param extended Flag to include detailed optimizer estimates.
     */
   private[flink] def explain(table: Table, extended: Boolean): String = {
@@ -143,16 +147,16 @@ abstract class BatchTableEnvironment(
     val sqlPlan = PlanJsonParser.getSqlExecutionPlan(jasonSqlPlan, extended)
 
     s"== Abstract Syntax Tree ==" +
-        System.lineSeparator +
-        s"${RelOptUtil.toString(ast)}" +
-        System.lineSeparator +
-        s"== Optimized Logical Plan ==" +
-        System.lineSeparator +
-        s"${RelOptUtil.toString(optimizedPlan)}" +
-        System.lineSeparator +
-        s"== Physical Execution Plan ==" +
-        System.lineSeparator +
-        s"$sqlPlan"
+      System.lineSeparator +
+      s"${RelOptUtil.toString(ast)}" +
+      System.lineSeparator +
+      s"== Optimized Logical Plan ==" +
+      System.lineSeparator +
+      s"${RelOptUtil.toString(optimizedPlan)}" +
+      System.lineSeparator +
+      s"== Physical Execution Plan ==" +
+      System.lineSeparator +
+      s"$sqlPlan"
   }
 
   /**
@@ -166,7 +170,7 @@ abstract class BatchTableEnvironment(
   /**
     * Registers a [[DataSet]] as a table under a given name in the [[TableEnvironment]]'s catalog.
     *
-    * @param name The name under which the table is registered in the catalog.
+    * @param name    The name under which the table is registered in the catalog.
     * @param dataSet The [[DataSet]] to register as table in the catalog.
     * @tparam T the type of the [[DataSet]].
     */
@@ -185,9 +189,9 @@ abstract class BatchTableEnvironment(
     * Registers a [[DataSet]] as a table under a given name with field names as specified by
     * field expressions in the [[TableEnvironment]]'s catalog.
     *
-    * @param name The name under which the table is registered in the catalog.
+    * @param name    The name under which the table is registered in the catalog.
     * @param dataSet The [[DataSet]] to register as table in the catalog.
-    * @param fields The field expressions to define the field names of the table.
+    * @param fields  The field expressions to define the field names of the table.
     * @tparam T The type of the [[DataSet]].
     */
   protected def registerDataSetInternal[T](
@@ -286,4 +290,10 @@ abstract class BatchTableEnvironment(
           "This is a bug and should not happen. Please file an issue.")
     }
   }
+
+  /**
+    * Returns DataSetCostFactory
+    */
+  override def getCostFactory: RelOptCostFactory = DataSetCost.FACTORY
+
 }

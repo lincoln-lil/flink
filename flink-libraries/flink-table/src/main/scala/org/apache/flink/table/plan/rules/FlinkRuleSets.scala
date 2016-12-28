@@ -70,6 +70,7 @@ object FlinkRuleSets {
 
     // join rules
     JoinPushExpressionsRule.INSTANCE,
+    JoinToMultiJoinRule.INSTANCE,
 
     // remove union with only a single child
     UnionEliminatorRule.INSTANCE,
@@ -171,7 +172,11 @@ object FlinkRuleSets {
       DataStreamValuesRule.INSTANCE,
       DataStreamCorrelateRule.INSTANCE,
       StreamTableSourceScanRule.INSTANCE,
-      PushProjectIntoStreamTableSourceScanRule.INSTANCE
+      PushProjectIntoStreamTableSourceScanRule.INSTANCE,
+
+      JoinToMultiJoinRule.INSTANCE,
+      // convert a HBaseTableJoin to a flatMapper
+      DataStreamJoinHTableSourceRule.INSTANCE
   )
 
 }

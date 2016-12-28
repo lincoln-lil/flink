@@ -18,6 +18,13 @@
 
 package org.apache.flink.table.plan.schema
 
+import java.lang.Double
+import java.util
+import java.util.Collections
+
+import org.apache.calcite.rel.{RelCollation, RelDistribution}
+import org.apache.calcite.schema.Statistic
+import org.apache.calcite.util.ImmutableBitSet
 import org.apache.flink.streaming.api.datastream.DataStream
 import org.apache.flink.table.plan.stats.FlinkStatistic
 
