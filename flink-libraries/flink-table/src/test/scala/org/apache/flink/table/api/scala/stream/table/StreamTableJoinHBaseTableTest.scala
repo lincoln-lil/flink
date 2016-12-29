@@ -46,7 +46,7 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
     // create a HBaseTableSource with schema
     val tableSource = new HBaseTableSource(
       tableName,
-      "rk_1"->Types.STRING,
+      "rk_1"->Types.INT,
       Array("a"->Types.STRING, "b"->Types.INT, "c"->Types.STRING),
       configMap)
 
@@ -75,19 +75,15 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
     //probably we defined a custom UDF for the join key's calculation, this is useful when join
     // a HBase table using transformed RowKey
     // register UDF
-    val rowkeyGenerator = KeyGenUsingHash
+    val rowkeyGenerator = KeyGenUsingNumber
     tEnv.registerFunction("rowkeyGenerator", rowkeyGenerator)
-
-
-    val rowkeyGenerator2 = KeyGenUsingNumber
-    tEnv.registerFunction("rowkeyGenerator2", rowkeyGenerator2)
 
     // streamTable join with the
     val resultTable = streamTable
-                      .select('id, 'len, 'content, rowkeyGenerator(""+'id, 8, 2).as('rowkey))
+                      .select('id, 'len, 'content, rowkeyGenerator('id).as('rowkey))
                       // only rowkey of a HBase table can be the join key
-                      .join(hbaseTable, 'rowkey === 'rk_1) // specify the join key of left table
-                      .join(hbaseTable2, "id === rk_2")
+                      .join(hbaseTable, 'id === 'rk_1) // specify the join key of left table
+                      .leftOuterJoin(hbaseTable2, "rowkey === rk_2")
                       .select('id, 'len, 'content, 'a, 'c, 'd, 'f)
 
     val results = resultTable.toDataStream[Row]
@@ -95,7 +91,10 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
     env.execute()
 
     val expected = Seq(
-      "1,1,Hi,a,No.1", "2,2,Hello,b,No.2", "4,5,Hello ,d,4,No.4", "8,11,Hello world,e,8,No.8")
+      "1,2,Hi,a,No.1,d,mod1",
+      "2,5,Hello,b,No.2,e,mod2",
+      "4,5,Hello ,d,No.4,f,mod4",
+      "8,11,Hello world,e,No.8,null,null")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
 
   }
@@ -130,7 +129,7 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
     // streamTable join with the
     val resultTable = streamTable
                       .join(hbaseTable, 'id === 'rk_1) // specify the join key of left table
-                      .select('id, 'len, 'content, 'a, 'b, 'c)
+                      .select('id, 'len, 'content, 'a, 'c)
 
     val results = resultTable.toDataStream[Row]
     results.addSink(new StreamITCase.StringSink)
@@ -139,8 +138,8 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
     val expected = Seq(
       "1,2,Hi,a,No.1",
       "2,5,Hello,b,No.2",
-      "4,5,Hello ,d,4,No.4",
-      "8,11,Hello world,e,8,No.8"
+      "4,5,Hello ,d,No.4",
+      "8,11,Hello world,e,No.8"
     )
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
 

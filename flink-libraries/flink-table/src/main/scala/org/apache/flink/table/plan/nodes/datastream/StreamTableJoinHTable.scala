@@ -112,7 +112,8 @@ class StreamTableJoinHTable(
         joinType,
         leftKeyIdx)
 
-      inputDataStream.flatMap(flatMapFunction).name(s"HTableJoin#${hTableSource.getTableName}")
+      inputDataStream.flatMap(flatMapFunction).name(s"${joinTypeToString}HTable#${hTableSource
+                                                                         .getTableName}")
       .asInstanceOf[DataStream[Any]]
     }
 

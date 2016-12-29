@@ -31,14 +31,23 @@ class HTableRowGetFunction[IN, OUT](
 
   val fieldTypes: Array[TypeInformation[_]] = hTableSource.getFieldTypes
 
-  val hTableStore: Map[Int, Tuple3[String, Int, String]] = Map(
-    1 -> Tuple3("a", 1, "No.1"),
-    2 -> Tuple3("b", 2, "No.2"),
-    3 -> Tuple3("c", 3, "No.3"),
-    4 -> Tuple3("d", 4, "No.4"),
-    8 -> Tuple3("e", 8, "No.8"),
-    16 -> Tuple3("f", 16, "No.16")
+  val hTableABC: Map[Int, Tuple3[String, Int, String]] = Map(
+  1 -> Tuple3("a", 1, "No.1"),
+  2 -> Tuple3("b", 2, "No.2"),
+  3 -> Tuple3("c", 3, "No.3"),
+  4 -> Tuple3("d", 4, "No.4"),
+  8 -> Tuple3("e", 8, "No.8"),
+  16 -> Tuple3("f", 16, "No.16")
   )
+
+  val hTableDEF: Map[Int, Tuple3[String, Int, String]] = Map(
+  1 -> Tuple3("d", 1, "mod1"),
+  2 -> Tuple3("e", 2, "mod2"),
+  4 -> Tuple3("f", 4, "mod4")
+  )
+
+  val hTableStore: Map[String,Map[Int, Tuple3[String, Int, String]]] = Map("table_abc" -> hTableABC,
+                                                                           "table_def" -> hTableDEF)
   //  val returnType: TypeInformation[OUT] = hTableSource.getReturnType
 
   override def open(parameters: Configuration): Unit = {
@@ -62,10 +71,13 @@ class HTableRowGetFunction[IN, OUT](
   override def flatMap(value: IN, out: Collector[OUT]): Unit = {
     val row = value.asInstanceOf[Row]
     val keyType: TypeInformation[_] = fieldTypes(sourceKeyIndex)
-    val keyValue: Int = row.getField(sourceKeyIndex).asInstanceOf[Int]
+    val keyValue = row.getField(sourceKeyIndex).asInstanceOf[Int]
     val resRowLen = row.getArity + fieldLength
     val result: Row = new Row(resRowLen)
-    val getRes:Option[Tuple3[String, Int, String]] = hTableStore.get(keyValue)
+
+    val store: Option[Map[Int, Tuple3[String, Int, String]]] = hTableStore.get(tableName);
+    // in real environment, we'll convert to bytes for a HBase get request
+    val getRes:Option[Tuple3[String, Int, String]] = store.get.get(keyValue)
 
     def cloneRow(src: Row, target: Row): Unit = {
       for (i <- 0 until src.getArity) {
