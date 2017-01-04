@@ -127,7 +127,7 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
     // streamTable join with the
     val resultTable = streamTable
                       .join(hbaseTable, 'id === 'rk_1) // specify the join key of left table
-                      .select('id, 'len, 'content, 'x_a, 'y_c)
+                      .select('id, 'len, 'content, 'x$a, 'y$c)
 
     val results = resultTable.toDataStream[Row]
     results.addSink(new StreamITCase.StringSink)

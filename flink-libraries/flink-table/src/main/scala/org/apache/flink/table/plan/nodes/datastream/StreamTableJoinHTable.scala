@@ -109,6 +109,9 @@ class StreamTableJoinHTable(
 
       // for test env, if(tableEnv.isInstanceOf[xx]) translate to test Function
       // otherwise production Function
+      if(tableEnv.isInstanceOf[TestStreamEnvironment]){
+
+      }
 
       val flatMapFunction: FlatMapFunction[Any, Any] = new HTableRowGetFunction(
         returnType.asInstanceOf[CompositeType[Any]],

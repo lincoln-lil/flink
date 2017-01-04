@@ -6,16 +6,20 @@ import org.apache.flink.api.java.{DataSet, ExecutionEnvironment}
 import org.apache.flink.streaming.api.datastream.DataStream
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment
 import org.apache.flink.table.functions.utils.UserParamMap
+import org.apache.flink.table.functions.utils.hbase.{DefalultResultParser, ResultParser}
 import org.apache.flink.types.Row
 
 class HBaseTableSource(
     val name: String,
-    val rowKey: Tuple2[String,TypeInformation[_]],
-    val fieldsInfo: Array[Tuple2[String,TypeInformation[_]]],
-    val configMap: UserParamMap) extends BatchTableSource[Row]
-                                            with StreamTableSource[Row] {
+    val rowKey: Tuple2[String, TypeInformation[_]],
+    val fieldsInfo: Array[Tuple2[String, TypeInformation[_]]],
+    val configMap: UserParamMap,
+    val parserClass: Class[_ <: ResultParser] = classOf[DefalultResultParser]
+) extends BatchTableSource[Row] with StreamTableSource[Row] {
 
   private val returnType = new RowTypeInfo(rowKey._2 +: fieldsInfo.map(_._2): _*)
+
+  def getParserClass: Class[_ <: ResultParser] = parserClass
 
   /** HBaseTable's rowKey always be the first field, so returns zero. */
   def getRowKeyIndex: Int = 0
