@@ -1,15 +1,16 @@
-package org.apache.flink.table.functions.utils
+package org.apache.flink.table.functions.utils.hbase
 
 import org.apache.calcite.rel.core.JoinRelType
 import org.apache.flink.api.common.functions.RichFlatMapFunction
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable
 import org.apache.flink.configuration.Configuration
-import org.apache.flink.util.Collector
+import org.apache.flink.table.functions.utils.WritableSerializer
 import org.apache.flink.table.sources.HBaseTableSource
 import org.apache.flink.types.Row
-import org.apache.hadoop.hbase.HBaseConfiguration
+import org.apache.flink.util.Collector
 import org.apache.hadoop.conf.{Configuration => HConfiguration}
+import org.apache.hadoop.hbase.HBaseConfiguration
 
 class HTableRowGetFunction[IN, OUT](
     resultType: TypeInformation[OUT],

@@ -57,7 +57,6 @@ class StreamTableJoinHTableRule extends ConverterRule(
     val traitSet: RelTraitSet = rel.getTraitSet.replace(DataStreamConvention.INSTANCE)
     val convLeft: RelNode = RelOptRule.convert(join.getInput(0), DataStreamConvention.INSTANCE)
 //    val convRight: RelNode = RelOptRule.convert(join.getInput(1), DataStreamConvention.INSTANCE)
-//    val joinInfo = join.get
     //    val joinInfo = join.analyzeCondition()
 
     def convertToJoinHTable(relNode: RelNode): StreamTableJoinHTable = {

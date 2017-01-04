@@ -117,19 +117,17 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
     val tableSource = new HBaseTableSource(
       tableName,
       "rk_1"->Types.INT,
-      Array("a"->Types.STRING, "b"->Types.INT, "c"->Types.STRING),
+      Array(("x$a",Types.STRING), "x$b"->Types.INT, "y$c"->Types.STRING),
       configMap)
 
     // register table source, this 'tableName' can be an alias of the physical one
-    tEnv.registerTableSource(tableName, tableSource)
-
     // ingest() will return a Table adapt to table api operation
-    val hbaseTable: Table = tEnv.ingest(tableName)
+    val hbaseTable: Table = tEnv.registerTableSource(tableName, tableSource)
 
     // streamTable join with the
     val resultTable = streamTable
                       .join(hbaseTable, 'id === 'rk_1) // specify the join key of left table
-                      .select('id, 'len, 'content, 'a, 'c)
+                      .select('id, 'len, 'content, 'x_a, 'y_c)
 
     val results = resultTable.toDataStream[Row]
     results.addSink(new StreamITCase.StringSink)

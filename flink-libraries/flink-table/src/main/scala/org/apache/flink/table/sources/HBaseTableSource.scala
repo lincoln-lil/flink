@@ -17,6 +17,9 @@ class HBaseTableSource(
 
   private val returnType = new RowTypeInfo(rowKey._2 +: fieldsInfo.map(_._2): _*)
 
+  /** HBaseTable's rowKey always be the first field, so returns zero. */
+  def getRowKeyIndex: Int = 0
+
   /** Returns the number of fields of the table. */
   override def getNumberOfFields: Int = fieldsInfo.length + 1
 

@@ -12,13 +12,14 @@ import org.apache.flink.table.api.{StreamTableEnvironment, TableException}
 import org.apache.flink.api.common.functions.FlatMapFunction
 import org.apache.flink.api.common.operators.base.JoinOperatorBase.JoinHint
 import org.apache.flink.api.common.typeutils.CompositeType
-import org.apache.flink.table.functions.utils.HTableRowGetFunction
 import org.apache.flink.table.sources.HBaseTableSource
 import org.apache.flink.table.typeutils.TypeConverter.determineReturnType
 import org.apache.flink.streaming.api.datastream.DataStream
 
 import scala.collection.JavaConverters._
 import java.util.List
+
+import org.apache.flink.table.functions.utils.hbase.HTableRowGetFunction
 
 class StreamTableJoinHTable(
     cluster: RelOptCluster,
@@ -97,7 +98,7 @@ class StreamTableJoinHTable(
     } else {
       val pair = keyPairs.get(0)
       // HBaseTable's rowKey index always be zero
-      val leftKeyIdx = if (pair.source == 0) {
+      val leftKeyIdx = if (pair.source == hTableSource.getRowKeyIndex) {
         pair.target
       } else {
         pair.source
@@ -106,15 +107,17 @@ class StreamTableJoinHTable(
       val inputDataStream = getInput.asInstanceOf[DataStreamRel].translateToPlan(tableEnv)
                             .asInstanceOf[DataStream[Any]]
 
+      // for test env, if(tableEnv.isInstanceOf[xx]) translate to test Function
+      // otherwise production Function
+
       val flatMapFunction: FlatMapFunction[Any, Any] = new HTableRowGetFunction(
         returnType.asInstanceOf[CompositeType[Any]],
         hTableSource,
         joinType,
         leftKeyIdx)
 
-      inputDataStream.flatMap(flatMapFunction).name(s"${joinTypeToString}HTable#${hTableSource
-                                                                         .getTableName}")
-      .asInstanceOf[DataStream[Any]]
+      inputDataStream.flatMap(flatMapFunction)
+      .name(s"${joinTypeToString}HTable#${hTableSource.getTableName}").asInstanceOf[DataStream[Any]]
     }
 
   }
