@@ -11,15 +11,19 @@ import org.apache.flink.types.Row
 
 class HBaseTableSource(
     val name: String,
-    val rowKey: Tuple2[String, TypeInformation[_]],
-    val fieldsInfo: Array[Tuple2[String, TypeInformation[_]]],
+    val rowKey: (String,TypeInformation[_]),
+    val fieldsInfo: Array[(String, TypeInformation[_])],
     val configMap: UserParamMap,
-    val parserClass: Class[_ <: ResultParser] = classOf[DefalultResultParser]
-) extends BatchTableSource[Row] with StreamTableSource[Row] {
+    val parserClass: ResultParser = new DefalultResultParser
+) extends BatchTableSource[Row] with StreamTableSource[Row] with Serializable{
 
   private val returnType = new RowTypeInfo(rowKey._2 +: fieldsInfo.map(_._2): _*)
 
-  def getParserClass: Class[_ <: ResultParser] = parserClass
+  val ASYNC_GET_DEFAULT_TIMEOUT_SECOND = 100
+
+  val ASYNC_BUFFER_DEFAULT_CAPACITY = 100
+
+  def getParserClass: ResultParser = parserClass
 
   /** HBaseTable's rowKey always be the first field, so returns zero. */
   def getRowKeyIndex: Int = 0

@@ -2,7 +2,9 @@ package org.apache.flink.table.functions.utils.hbase;
 
 import org.apache.hadoop.hbase.client.Result;
 
-public interface ResultParser {
+import java.io.Serializable;
+
+public interface ResultParser extends Serializable {
 
     /**
      * parse @org.apache.hadoop.hbase.client.Result to FieldMap

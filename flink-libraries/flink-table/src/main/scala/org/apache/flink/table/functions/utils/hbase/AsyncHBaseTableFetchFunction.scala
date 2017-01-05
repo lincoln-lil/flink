@@ -3,6 +3,7 @@ package org.apache.flink.table.functions.utils.hbase
 import org.apache.calcite.rel.core.JoinRelType
 import org.apache.commons.lang.StringUtils
 import org.apache.flink.api.common.typeinfo.TypeInformation
+import org.apache.flink.api.java.typeutils.ResultTypeQueryable
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.functions.async.RichAsyncFunction
 import org.apache.flink.streaming.api.functions.async.collector.AsyncCollector
@@ -13,13 +14,13 @@ import org.apache.hadoop.conf.{Configuration => HConfiguration}
 import org.apache.hadoop.hbase.client._
 import org.apache.hadoop.hbase.util.Bytes
 import org.apache.hadoop.hbase.{HBaseConfiguration, TableName}
-import scala.reflect.runtime.universe._
 
 class AsyncHBaseTableFetchFunction[IN, OUT](
     resultType: TypeInformation[OUT],
     hTableSource: HBaseTableSource,
     joinType: JoinRelType,
-    sourceKeyIndex: Int) extends RichAsyncFunction[IN, OUT] {
+    sourceKeyIndex: Int) extends RichAsyncFunction[IN, OUT] with Serializable with
+                                 ResultTypeQueryable[OUT]{
   val tableName: String = hTableSource.getTableName
 
   @transient var hTableConnection: Connection = null
@@ -44,10 +45,8 @@ class AsyncHBaseTableFetchFunction[IN, OUT](
 
   override def open(parameters: Configuration): Unit = {
     super.open(parameters)
-    // construct a ResultParser instance
-    val m = runtimeMirror(getClass.getClassLoader)
-    val classType = m.runtimeClass(typeOf[hTableSource.parserClass.type].typeSymbol.asClass)
-    resultParser = m.reflect(classType).asInstanceOf[ResultParser]
+
+    resultParser = hTableSource.parserClass
 
     // connect hbase
     val hbaseConfiguration: HConfiguration = HBaseConfiguration.create()
@@ -121,4 +120,5 @@ class AsyncHBaseTableFetchFunction[IN, OUT](
         resultParser))
   }
 
+  override def getProducedType: TypeInformation[OUT] = resultType
 }

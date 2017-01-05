@@ -10,6 +10,7 @@ import org.apache.flink.streaming.api.scala.{DataStream, StreamExecutionEnvironm
 import org.apache.flink.table.api.{Table, TableEnvironment, Types}
 import org.apache.flink.table.functions.ScalarFunction
 import org.apache.flink.table.functions.utils.UserParamMap
+import org.apache.flink.table.functions.utils.hbase.{DefalultResultParser, MyResultParser}
 import org.apache.flink.table.sources.HBaseTableSource
 import org.junit.Assert._
 import org.junit.Test
@@ -109,16 +110,18 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
     val streamTable = stream.toTable(tEnv, 'id, 'len, 'content)
 
     // specify physical table name in HBase
-    val tableName = "table_abc"
+    val tableName = "lincoln_test"
     // create a custom configuration map
-    val configMap: UserParamMap = UserParamMap().add("hbase.zookeeper.quorum", "localhost");
+    val configMap: UserParamMap = UserParamMap().add("hbase.zookeeper.quorum", "hadoop1027.et2sqa.tbsite.net,hadoop1026.et2sqa.tbsite.net,hadoop1028.et2sqa.tbsite.net");
 
     // create a HBaseTableSource with schema
     val tableSource = new HBaseTableSource(
       tableName,
       "rk_1"->Types.INT,
-      Array(("x$a",Types.STRING), "x$b"->Types.INT, "y$c"->Types.STRING),
-      configMap)
+      Array(("a$a",Types.STRING), "a$b"->Types.INT, "a$c"->Types.STRING),
+      configMap
+      //, new MyResultParser // optional
+    )
 
     // register table source, this 'tableName' can be an alias of the physical one
     // ingest() will return a Table adapt to table api operation
@@ -127,7 +130,7 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
     // streamTable join with the
     val resultTable = streamTable
                       .join(hbaseTable, 'id === 'rk_1) // specify the join key of left table
-                      .select('id, 'len, 'content, 'x$a, 'y$c)
+                      .select('id, 'len, 'content, 'a$a, 'a$c)
 
     val results = resultTable.toDataStream[Row]
     results.addSink(new StreamITCase.StringSink)

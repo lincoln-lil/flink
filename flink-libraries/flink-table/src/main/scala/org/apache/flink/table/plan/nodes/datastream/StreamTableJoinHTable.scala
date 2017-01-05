@@ -12,14 +12,19 @@ import org.apache.flink.table.api.{StreamTableEnvironment, TableException}
 import org.apache.flink.api.common.functions.FlatMapFunction
 import org.apache.flink.api.common.operators.base.JoinOperatorBase.JoinHint
 import org.apache.flink.api.common.typeutils.CompositeType
+import org.apache.flink.streaming.api.functions.async.AsyncFunction
 import org.apache.flink.table.sources.HBaseTableSource
 import org.apache.flink.table.typeutils.TypeConverter.determineReturnType
-import org.apache.flink.streaming.api.datastream.DataStream
+import org.apache.flink.streaming.util._
+import org.apache.flink.types.Row
+//import org.apache.flink.streaming.api.scala.{AsyncDataStream, DataStream}
+import org.apache.flink.streaming.api.datastream.{AsyncDataStream, DataStream}
+import org.apache.flink.table.functions.utils.hbase.{AsyncHBaseTableFetchFunction, HTableRowGetFunction}
 
 import scala.collection.JavaConverters._
+import scala.concurrent.duration
 import java.util.List
 
-import org.apache.flink.table.functions.utils.hbase.HTableRowGetFunction
 
 class StreamTableJoinHTable(
     cluster: RelOptCluster,
@@ -107,20 +112,31 @@ class StreamTableJoinHTable(
       val inputDataStream = getInput.asInstanceOf[DataStreamRel].translateToPlan(tableEnv)
                             .asInstanceOf[DataStream[Any]]
 
-      // for test env, if(tableEnv.isInstanceOf[xx]) translate to test Function
-      // otherwise production Function
-      if(tableEnv.isInstanceOf[TestStreamEnvironment]){
+      // for test env, translate to test HBaseGetFunction, otherwise production Function
+      /*  val flatMapFunction: FlatMapFunction[Any, Any] = new HTableRowGetFunction(
+          returnType.asInstanceOf[CompositeType[Any]],
+          hTableSource,
+          joinType,
+          leftKeyIdx)
 
-      }
+        inputDataStream.flatMap(flatMapFunction)
+        .name(s"${joinTypeToString}HTable#${hTableSource.getTableName}")
+        .asInstanceOf[DataStream[Any]]*/
 
-      val flatMapFunction: FlatMapFunction[Any, Any] = new HTableRowGetFunction(
-        returnType.asInstanceOf[CompositeType[Any]],
-        hTableSource,
-        joinType,
-        leftKeyIdx)
+        val asyncFunction = new AsyncHBaseTableFetchFunction[Any, Any](
+          returnType.asInstanceOf[CompositeType[Any]],
+          hTableSource,
+          joinType,
+          leftKeyIdx).asInstanceOf[AsyncFunction[Any, Any]]
 
-      inputDataStream.flatMap(flatMapFunction)
-      .name(s"${joinTypeToString}HTable#${hTableSource.getTableName}").asInstanceOf[DataStream[Any]]
+        AsyncDataStream
+        .orderedWait(
+          inputDataStream,
+          asyncFunction,
+          hTableSource.ASYNC_GET_DEFAULT_TIMEOUT_SECOND,
+          duration.SECONDS,
+          hTableSource.ASYNC_BUFFER_DEFAULT_CAPACITY)
+
     }
 
   }
