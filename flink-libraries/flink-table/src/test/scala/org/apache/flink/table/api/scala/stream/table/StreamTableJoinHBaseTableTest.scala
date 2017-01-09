@@ -10,7 +10,7 @@ import org.apache.flink.streaming.api.scala.{DataStream, StreamExecutionEnvironm
 import org.apache.flink.table.api.{Table, TableEnvironment, Types}
 import org.apache.flink.table.functions.ScalarFunction
 import org.apache.flink.table.functions.utils.UserParamMap
-import org.apache.flink.table.functions.utils.hbase.{DefalultResultParser, MyResultParser}
+import org.apache.flink.table.functions.utils.hbase.{CachePolicy, DefalultResultParser, MyResultParser}
 import org.apache.flink.table.sources.HBaseTableSource
 import org.junit.Assert._
 import org.junit.Test
@@ -97,7 +97,6 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
       "4,5,Hello ,d,No.4,f,mod4",
       "8,11,Hello world,e,No.8,null,null")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
-
   }
 
   @Test
@@ -110,9 +109,9 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
     val streamTable = stream.toTable(tEnv, 'id, 'len, 'content)
 
     // specify physical table name in HBase
-    val tableName = "lincoln_test"
+    val tableName = "table_abc"
     // create a custom configuration map
-    val configMap: UserParamMap = UserParamMap().add("hbase.zookeeper.quorum", "hadoop1027.et2sqa.tbsite.net,hadoop1026.et2sqa.tbsite.net,hadoop1028.et2sqa.tbsite.net");
+    val configMap: UserParamMap = UserParamMap().add("hbase.zookeeper.quorum", "localhost");
 
     // create a HBaseTableSource with schema
     val tableSource = new HBaseTableSource(
@@ -120,7 +119,8 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
       "rk_1"->Types.INT,
       Array(("a$a",Types.STRING), "a$b"->Types.INT, "a$c"->Types.STRING),
       configMap
-      //, new MyResultParser // optional
+//      ,new MyResultParser // optional
+//      ,CachePolicy.rowCountWithTtlLRU(100000, 300)// optional
     )
 
     // register table source, this 'tableName' can be an alias of the physical one
@@ -130,7 +130,7 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
     // streamTable join with the
     val resultTable = streamTable
                       .join(hbaseTable, 'id === 'rk_1) // specify the join key of left table
-                      .select('id, 'len, 'content, 'a$a, 'a$c)
+                      .select('id, 'len, 'content, 'a$a as 'a, 'a$c as 'c)
 
     val results = resultTable.toDataStream[Row]
     results.addSink(new StreamITCase.StringSink)
@@ -143,10 +143,7 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
       "8,11,Hello world,e,No.8"
     )
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
-
   }
-
-
 }
 
 object KeyGenUsingNumber extends ScalarFunction {

@@ -17,11 +17,12 @@ public class JoinHTableAsyncGetCallback extends AsyncGetCallback {
     int sourceKeyIdx = 0;
     Row leftRow = null;
     ResultParser resultParser = null;
+    LRUCache<String, FieldMap> cacheReference = null;
 
     public JoinHTableAsyncGetCallback(
             AsyncCollector collector, byte[] row, HBaseTableSource
             tableSource, JoinRelType joinType, int sourceKeyIdx, Row leftRow, ResultParser
-                    resultParser) {
+                    resultParser, LRUCache cache) {
         super(row);
         this.leftRow = leftRow;
         this.collector = collector;
@@ -29,13 +30,17 @@ public class JoinHTableAsyncGetCallback extends AsyncGetCallback {
         this.joinType = joinType;
         this.sourceKeyIdx = sourceKeyIdx;
         this.resultParser = resultParser;
+        this.cacheReference = cache;
     }
 
     @Override
     public void processResult(Result result) {
         // parse result
         FieldMap row = resultParser.parseResult(result);
-
+        String key = String.valueOf(leftRow.getField(sourceKeyIdx));
+        if(cacheReference!=null && row!=null){
+            cacheReference.put(key, row);
+        }
         // join
         Row resRow = new Row(leftRow.getArity() + tableSource.getNumberOfFields());
         if (row == null && joinType == JoinRelType.INNER) {
@@ -47,7 +52,7 @@ public class JoinHTableAsyncGetCallback extends AsyncGetCallback {
                 resRow.setField(idx, leftRow.getField(idx));
             }
             // copy rowkey column, it can be removed when support projection push down
-            resRow.setField(leftRow.getArity(), leftRow.getField(sourceKeyIdx));
+            resRow.setField(leftRow.getArity(), key);
             for (int idx = 1; idx < tableSource.getNumberOfFields(); idx++) {
                 resRow.setField(
                         leftRow.getArity() + idx,

@@ -1,5 +1,7 @@
 package org.apache.flink.table.functions.utils.hbase
 
+import java.util
+
 import org.apache.calcite.rel.core.JoinRelType
 import org.apache.commons.lang.StringUtils
 import org.apache.flink.api.common.typeinfo.TypeInformation
@@ -29,6 +31,8 @@ class AsyncHBaseTableFetchFunction[IN, OUT](
 
   @transient var resultParser: ResultParser = null
 
+  @transient var cache: LRUCache[String, FieldMap] = null
+
   val hbaseQuorumName = "hbase.zookeeper.quorum"
 
   val serializedConfig: Array[Byte] = {
@@ -47,6 +51,10 @@ class AsyncHBaseTableFetchFunction[IN, OUT](
     super.open(parameters)
 
     resultParser = hTableSource.parserClass
+
+    if(hTableSource.cachePolicy!=CachePolicy.Strategy.NONE){
+      cache = CacheFactory.getCache(tableName, hTableSource.cachePolicy)
+    }
 
     // connect hbase
     val hbaseConfiguration: HConfiguration = HBaseConfiguration.create()
@@ -96,10 +104,10 @@ class AsyncHBaseTableFetchFunction[IN, OUT](
   }
 
   override def asyncInvoke(input: IN, collector: AsyncCollector[OUT]): Unit = {
-    //    val keyType =  fieldTypes(sourceKeyIndex)
     val inputRow = input.asInstanceOf[Row]
-    val keyValue = inputRow.getField(sourceKeyIndex)
-    val rowKeyBytes = Bytes.toBytes(String.valueOf(keyValue))
+    //    val keyType =  fieldTypes(sourceKeyIndex)
+    val key = String.valueOf(inputRow.getField(sourceKeyIndex))
+    val rowKeyBytes = Bytes.toBytes(key)
 
     val get = new Get(rowKeyBytes)
     for(idx <- 1 until hTableSource.getNumberOfFields){
@@ -107,17 +115,33 @@ class AsyncHBaseTableFetchFunction[IN, OUT](
       get.addColumn(Bytes.toBytes(kv(0)), Bytes.toBytes(kv(1)))
     }
 
-    hTable
-    .asyncGet(
-      get,
-      new JoinHTableAsyncGetCallback(
-        collector,
-        rowKeyBytes,
-        hTableSource,
-        joinType,
-        sourceKeyIndex,
-        inputRow,
-        resultParser))
+    val cached = if(cache!=null) cache.get(key) else null
+    if(cached!=null){
+      // cache hit, do join and collect
+      val row = new Row(inputRow.getArity+cached.size())
+      for (i <- 0 until inputRow.getArity) {
+        row.setField(i, inputRow.getField(i))
+      }
+      for (j <- 0 until fieldNames.length){
+        row.setField(inputRow.getArity-1+j, cached.get(fieldNames(j)))
+      }
+      val resList = new util.ArrayList[OUT](1)
+      resList.add(row.asInstanceOf[OUT])
+      collector.collect(resList)
+
+    }else{
+      hTable.asyncGet(
+        get,
+        new JoinHTableAsyncGetCallback(
+          collector,
+          rowKeyBytes,
+          hTableSource,
+          joinType,
+          sourceKeyIndex,
+          inputRow,
+          resultParser,
+          cache))
+    }
   }
 
   override def getProducedType: TypeInformation[OUT] = resultType

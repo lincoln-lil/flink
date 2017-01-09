@@ -6,7 +6,7 @@ import org.apache.flink.api.java.{DataSet, ExecutionEnvironment}
 import org.apache.flink.streaming.api.datastream.DataStream
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment
 import org.apache.flink.table.functions.utils.UserParamMap
-import org.apache.flink.table.functions.utils.hbase.{DefalultResultParser, ResultParser}
+import org.apache.flink.table.functions.utils.hbase.{CachePolicy, DefalultResultParser, ResultParser}
 import org.apache.flink.types.Row
 
 class HBaseTableSource(
@@ -14,7 +14,8 @@ class HBaseTableSource(
     val rowKey: (String,TypeInformation[_]),
     val fieldsInfo: Array[(String, TypeInformation[_])],
     val configMap: UserParamMap,
-    val parserClass: ResultParser = new DefalultResultParser
+    var parserClass: ResultParser = new DefalultResultParser,
+    var cachePolicy: CachePolicy = CachePolicy.none
 ) extends BatchTableSource[Row] with StreamTableSource[Row] with Serializable{
 
   private val returnType = new RowTypeInfo(rowKey._2 +: fieldsInfo.map(_._2): _*)
@@ -22,6 +23,16 @@ class HBaseTableSource(
   val ASYNC_GET_DEFAULT_TIMEOUT_SECOND = 100
 
   val ASYNC_BUFFER_DEFAULT_CAPACITY = 100
+
+  def withParserClass(newParser: ResultParser): HBaseTableSource = {
+    parserClass = newParser
+    this
+  }
+
+  def withCachePolicy(newPolicy: CachePolicy): HBaseTableSource = {
+    cachePolicy = newPolicy
+    this
+  }
 
   def getParserClass: ResultParser = parserClass
 
