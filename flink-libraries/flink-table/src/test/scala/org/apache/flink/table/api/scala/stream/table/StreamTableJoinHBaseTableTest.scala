@@ -119,8 +119,8 @@ class StreamTableJoinHBaseTableTest extends StreamingMultipleProgramsTestBase {
       "rk_1"->Types.INT,
       Array(("a$a",Types.STRING), "a$b"->Types.INT, "a$c"->Types.STRING),
       configMap
-//      ,new MyResultParser // optional
-//      ,CachePolicy.rowCountWithTtlLRU(100000, 300)// optional
+      ,parserClass = new MyResultParser // optional
+      ,cachePolicy = CachePolicy.rowCountWithTtlLRU(100000, 300)// optional
     )
 
     // register table source, this 'tableName' can be an alias of the physical one

@@ -1,6 +1,8 @@
 package org.apache.flink.table.functions.utils.hbase;
 
-public class CachePolicy {
+import java.io.Serializable;
+
+public class CachePolicy implements Serializable{
 
     Strategy cacheStrategy = null;
 
