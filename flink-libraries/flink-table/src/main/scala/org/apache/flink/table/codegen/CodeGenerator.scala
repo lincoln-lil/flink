@@ -352,6 +352,64 @@ class CodeGenerator(
   }
 
   /**
+    * Similar to #generateConverterResultExpression, difference is this function satisfy to that
+    * one input is null when generating result expression.
+    * @param returnType conversion target type. Inputs and output must have the same arity.
+    * @param resultFieldNames result field names necessary for a mapping to POJO fields.
+    * @param isNullFromLeft input1 is null if true, otherwise input2 is null
+    * @return
+    */
+  def generateConverterResultWithOneSideNullExpression(
+      returnType: TypeInformation[_ <: Any],
+      resultFieldNames: Seq[String],
+      isNullFromLeft: Boolean)
+  : GeneratedExpression = {
+
+    val input1AccessExprs = for (i <- 0 until input1.getArity)
+      yield if (isNullFromLeft) {
+        generateNullInputFieldAccess(
+          input1,
+          input1Term,
+          i,
+          input1PojoFieldMapping)
+      } else {
+        generateInputAccess(
+          input1,
+          input1Term,
+          i,
+          input1PojoFieldMapping)
+      }
+
+    val input2AccessExprs = input2 match {
+      case Some(ti) => for (i <- 0 until ti.getArity)
+        yield if (!isNullFromLeft) {
+          generateNullInputFieldAccess(
+            ti,
+            input2Term,
+            i,
+            input2PojoFieldMapping)
+        } else {
+          generateInputAccess(
+            ti,
+            input2Term,
+            i,
+            input2PojoFieldMapping)
+        }
+      case None => Seq() // add nothing
+    }
+
+    generateResultExpression(input1AccessExprs ++ input2AccessExprs, returnType, resultFieldNames)
+  }
+
+  def generateInput2NotNullExpression(): String = {
+    s"$input2Term != null"
+  }
+
+  def generateInput1NotNullExpression(): String = {
+    s"$input1Term != null"
+  }
+
+  /**
     * Generates an expression from the left input and the right table function.
     */
   def generateCorrelateAccessExprs: (Seq[GeneratedExpression], Seq[GeneratedExpression]) = {
@@ -1092,6 +1150,39 @@ class CodeGenerator(
         |  $resultTerm = ${fieldAccessExpr.resultTerm};
         |  $nullTerm = ${fieldAccessExpr.nullTerm};
         |}
+        |""".stripMargin
+
+    GeneratedExpression(resultTerm, nullTerm, inputCheckCode, fieldType)
+  }
+
+  private def generateNullInputFieldAccess(
+      inputType: TypeInformation[Any],
+      inputTerm: String,
+      index: Int,
+      pojoFieldMapping: Option[Array[Int]])
+    : GeneratedExpression = {
+    val resultTerm = newName("result")
+    val nullTerm = newName("isNull")
+
+    val fieldType = inputType match {
+      case ct: CompositeType[_] =>
+        val fieldIndex = if (ct.isInstanceOf[PojoTypeInfo[_]]) {
+          pojoFieldMapping.get(index)
+        }
+        else {
+          index
+        }
+        ct.getTypeAt(fieldIndex)
+      case at: AtomicType[_] => at
+      case _ => throw new CodeGenException("Unsupported type for input field access.")
+    }
+    val resultTypeTerm = primitiveTypeTermForTypeInfo(fieldType)
+    val defaultValue = primitiveDefaultValue(fieldType)
+
+    val inputCheckCode =
+      s"""
+        |$resultTypeTerm $resultTerm = $defaultValue;
+        |boolean $nullTerm = true;
         |""".stripMargin
 
     GeneratedExpression(resultTerm, nullTerm, inputCheckCode, fieldType)

@@ -217,6 +217,57 @@ class JoinITCase(
   }
 
   @Test
+  def testConditionalLeftOuterJoin(): Unit = {
+    val env: ExecutionEnvironment = ExecutionEnvironment.getExecutionEnvironment
+    val tEnv = TableEnvironment.getTableEnvironment(env, config)
+    tEnv.getConfig.setNullCheck(true)
+
+    val ds1 = CollectionDataSets.get3TupleDataSet(env).toTable(tEnv, 'a, 'b, 'c)
+    val ds2 = CollectionDataSets.get5TupleDataSet(env).toTable(tEnv, 'd, 'e, 'f, 'g, 'h)
+
+    //in leftOuterJoin case, the expression "'e > 0" belongs to right table will be treated as a
+    //filter push to right table
+    val joinT = ds1.leftOuterJoin(ds2, 'a > 1 && 'e < 15 && 'a === 'd).select('c, 'g)
+
+    val expected = "Hi,null\n" + "Hello,Hallo Welt\n" + "Hello,Hallo Welt wie\n" +
+      "Hello world,Hallo Welt wie gehts?\n" + "Hello world,ABC\n" + "Hello world,BCD\n" +
+      "Hello world, how are you?,CDE\n" + "Hello world, how are you?,DEF\n" +
+      "Hello world, how are you?,EFG\n" + "Hello world, how are you?,FGH\n" + "I am fine.,GHI\n" +
+      "I am fine.,HIJ\n" + "I am fine.,IJK\n" + "I am fine.,JKL\n" + "Luke Skywalker,null\n" +
+      "Comment#1,null\n" + "Comment#2,null\n" + "Comment#3,null\n" + "Comment#4,null\n" +
+      "Comment#5,null\n" + "Comment#6,null\n" + "Comment#7,null\n" + "Comment#8,null\n" +
+      "Comment#9,null\n" + "Comment#10,null\n" + "Comment#11,null\n" + "Comment#12,null\n" +
+      "Comment#13,null\n" + "Comment#14,null\n" + "Comment#15,null\n"
+    val results = joinT.toDataSet[Row].collect()
+    TestBaseUtils.compareResultAsText(results.asJava, expected)
+  }
+
+  @Test(expected = classOf[ValidationException])
+  def testConditionalFullOuterJoin(): Unit = {
+    val env: ExecutionEnvironment = ExecutionEnvironment.getExecutionEnvironment
+    val tEnv = TableEnvironment.getTableEnvironment(env, config)
+    tEnv.getConfig.setNullCheck(true)
+
+    val ds1 = CollectionDataSets.get3TupleDataSet(env).toTable(tEnv, 'a, 'b, 'c)
+    val ds2 = CollectionDataSets.get5TupleDataSet(env).toTable(tEnv, 'd, 'e, 'f, 'g, 'h)
+
+    val joinT = ds1.fullOuterJoin(ds2, 'a > 1 && 'f > 10 && 'a === 'd).select('c, 'g)
+    val results = joinT.toDataSet[Row].collect()
+  }
+
+  @Test(expected = classOf[ValidationException])
+  def testNoEquiJoin(): Unit = {
+    val env: ExecutionEnvironment = ExecutionEnvironment.getExecutionEnvironment
+    val tEnv = TableEnvironment.getTableEnvironment(env, config)
+    tEnv.getConfig.setNullCheck(true)
+
+    val ds1 = CollectionDataSets.get3TupleDataSet(env).toTable(tEnv, 'a, 'b, 'c)
+    val ds2 = CollectionDataSets.get5TupleDataSet(env).toTable(tEnv, 'd, 'e, 'f, 'g, 'h)
+
+    val joinT = ds2.leftOuterJoin(ds1, 'b < 'd).select('c, 'g)
+  }
+
+  @Test
   def testRightJoinWithMultipleKeys(): Unit = {
     val env: ExecutionEnvironment = ExecutionEnvironment.getExecutionEnvironment
     val tEnv = TableEnvironment.getTableEnvironment(env, config)
@@ -236,7 +287,7 @@ class JoinITCase(
   }
 
   @Test
-  def testRightJoinWithNotOnlyEquiJoin(): Unit = {
+  def testConditionalRightOuterJoin(): Unit = {
     val env: ExecutionEnvironment = ExecutionEnvironment.getExecutionEnvironment
     val tEnv = TableEnvironment.getTableEnvironment(env, config)
     tEnv.getConfig.setNullCheck(true)
@@ -246,7 +297,10 @@ class JoinITCase(
 
     val joinT = ds1.rightOuterJoin(ds2, 'a === 'd && 'b < 'h).select('c, 'g)
 
-    val expected = "Hello world,BCD\n"
+    val expected = "null,Hallo\n" + "null,Hallo Welt\n" + "null,Hallo Welt wie\n" +
+      "null,Hallo Welt wie gehts?\n" + "null,ABC\n" + "Hello world,BCD\n" + "null,CDE\n" +
+      "null,DEF\n" + "null,EFG\n" + "null,FGH\n" + "null,GHI\n" + "null,HIJ\n" +
+      "null,IJK\n" + "null,JKL\n" + "null,KLM\n"
     val results = joinT.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -271,6 +325,26 @@ class JoinITCase(
       "Comment#9,null\n" + "Comment#10,null\n" + "Comment#11,null\n" + "Comment#12,null\n" +
       "Comment#13,null\n" + "Comment#14,null\n" + "Comment#15,null\n" +
       "Hello world, how are you?,null\n"
+    val results = joinT.toDataSet[Row].collect()
+    TestBaseUtils.compareResultAsText(results.asJava, expected)
+  }
+
+  @Test
+  def testFullOuterJoinWithFilter(): Unit = {
+    val env: ExecutionEnvironment = ExecutionEnvironment.getExecutionEnvironment
+    val tEnv = TableEnvironment.getTableEnvironment(env, config)
+    tEnv.getConfig.setNullCheck(true)
+
+    val ds1 = CollectionDataSets.get3TupleDataSet(env).toTable(tEnv, 'a, 'b, 'c)
+    val ds2 = CollectionDataSets.get5TupleDataSet(env).toTable(tEnv, 'd, 'e, 'f, 'g, 'h)
+
+    val joinT = ds1.fullOuterJoin(ds2, 'a === 'f).where('d > 0).select('c, 'g)
+
+    val expected = "null,Hallo\n" + "Hi,Hallo Welt\n" + "Hello,Hallo Welt wie\n" +
+      "Hello world,Hallo Welt wie gehts?\n" + "Hello world, how are you?,ABC\n" +
+      "I am fine.,BCD\n" + "Luke Skywalker,CDE\n" + "Comment#1,DEF\n" + "Comment#2,EFG\n" +
+      "Comment#3,FGH\n" + "Comment#4,GHI\n" + "Comment#5,HIJ\n" + "Comment#6,IJK\n" +
+      "Comment#7,JKL\n" + "Comment#8,KLM\n"
     val results = joinT.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }

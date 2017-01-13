@@ -456,21 +456,22 @@ case class Join(
 
     def checkIfJoinCondition(exp : BinaryComparison) = exp.children match {
         case (x : JoinFieldReference) :: (y : JoinFieldReference) :: Nil
-          if x.isFromLeftInput != y.isFromLeftInput => Unit
-        case x => failValidation(
-          s"Invalid non-join predicate $exp. For non-join predicates use Table#where.")
+          if x.isFromLeftInput != y.isFromLeftInput => true
+        case _ => false
       }
 
     var equiJoinFound = false
+    var nonEquiJoinFound = false
     def validateConditions(exp: Expression, isAndBranch: Boolean): Unit = exp match {
       case x: And => x.children.foreach(validateConditions(_, isAndBranch))
       case x: Or => x.children.foreach(validateConditions(_, isAndBranch = false))
       case x: EqualTo =>
-        if (isAndBranch) {
+        if (isAndBranch && checkIfJoinCondition(x)) {
           equiJoinFound = true
+        }else{
+          nonEquiJoinFound = true
         }
-        checkIfJoinCondition(x)
-      case x: BinaryComparison => checkIfJoinCondition(x)
+      case x: BinaryComparison => {nonEquiJoinFound = true}
       case x => failValidation(
         s"Unsupported condition type: ${x.getClass.getSimpleName}. Condition: $x")
     }
@@ -478,6 +479,9 @@ case class Join(
     validateConditions(expression, isAndBranch = true)
     if (!equiJoinFound) {
       failValidation(s"Invalid join condition: $expression. At least one equi-join required.")
+    }
+    if (joinType == JoinType.FULL_OUTER && nonEquiJoinFound){
+      failValidation(s"Invalid join condition: $expression on full outer join.")
     }
   }
 }

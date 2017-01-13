@@ -184,14 +184,53 @@ class DataSetJoin(
     }
     else {
       val condition = generator.generateExpression(joinCondition)
-      body = s"""
-           |${condition.code}
-           |if (${condition.resultTerm}) {
-           |  ${conversion.code}
-           |  ${generator.collectorTerm}.collect(${conversion.resultTerm});
-           |}
-           |""".stripMargin
+      if (joinType == JoinRelType.LEFT) {
+        val conversionWithNullRight = generator.generateConverterResultWithOneSideNullExpression(
+          returnType,
+          joinRowType.getFieldNames,
+          false)
+
+        body =
+          s"""
+             |${condition.code}
+             |if (${condition.resultTerm}) {
+             |  ${conversion.code}
+             |  ${generator.collectorTerm}.collect(${conversion.resultTerm});
+             |} else if (${generator.generateInput1NotNullExpression()}) {
+             |  ${conversionWithNullRight.code}
+             |  ${generator.collectorTerm}.collect(${conversionWithNullRight.resultTerm});
+             |}
+             |""".stripMargin
+      } else if (joinType == JoinRelType.RIGHT) {
+        val conversionWithNullLeft = generator.generateConverterResultWithOneSideNullExpression(
+          returnType,
+          joinRowType.getFieldNames,
+          true)
+
+        body =
+          s"""
+             |${condition.code}
+             |if (${condition.resultTerm}) {
+             |  ${conversion.code}
+             |  ${generator.collectorTerm}.collect(${conversion.resultTerm});
+             |} else if (${generator.generateInput2NotNullExpression()}) {
+             |  ${conversionWithNullLeft.code}
+             |  ${generator.collectorTerm}.collect(${conversionWithNullLeft.resultTerm});
+             |}
+             |""".stripMargin
+      } else {
+      // joinType == JoinRelType.INNER || joinType == JoinRelType.FULL
+        body =
+          s"""
+             |${condition.code}
+             |if (${condition.resultTerm}) {
+             |  ${conversion.code}
+             |  ${generator.collectorTerm}.collect(${conversion.resultTerm});
+             |}
+             |""".stripMargin
+      }
     }
+
     val genFunction = generator.generateFunction(
       ruleDescription,
       classOf[FlatJoinFunction[Any, Any, Any]],
