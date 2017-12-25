@@ -75,7 +75,7 @@ class SetOperatorsTest extends TableTestBase {
     val expected = unaryNode(
       "DataSetCalc",
       batchTableNode(0),
-      term("select", "IN(b, 1972-02-22 07:12:00.333) AS b2")
+      term("select", "IN(b, 1972-02-22 07:12:00.333) AS _c0")
     )
 
     util.verifyTable(in, expected)

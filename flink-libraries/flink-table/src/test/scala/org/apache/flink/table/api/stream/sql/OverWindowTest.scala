@@ -290,7 +290,7 @@ class OverWindowTest extends TableTestBase {
     val sql = "SELECT " +
       "c, " +
       "count(a) OVER (PARTITION BY c ORDER BY rowtime " +
-      "RANGE BETWEEN INTERVAL '1' SECOND  preceding AND CURRENT ROW) " +
+      "RANGE BETWEEN INTERVAL '1' SECOND  preceding AND CURRENT ROW) as cnt " +
       "from MyTable"
 
     val expected =

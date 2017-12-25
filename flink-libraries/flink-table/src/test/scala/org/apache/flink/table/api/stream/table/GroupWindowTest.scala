@@ -628,7 +628,7 @@ class GroupWindowTest extends TableTestBase {
     val windowedTable = table
       .window(Tumble over 5.milli on 'rowtime as 'w)
       .groupBy('w, 'string)
-      .select('string, 'int.count, 'w.start, 'w.end)
+      .select('string, 'int.count as 't1, 'w.start, 'w.end)
 
     val expected = unaryNode(
       "DataStreamGroupWindowAggregate",

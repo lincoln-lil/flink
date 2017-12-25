@@ -1108,9 +1108,7 @@ class OverWindowedTable(
       table.tableEnv,
       Project(
         expandedOverFields.map(UnresolvedAlias),
-        table.logicalPlan,
-        // required for proper projection push down
-        explicitAlias = true)
+        table.logicalPlan)
         .validate(table.tableEnv)
     )
   }
@@ -1156,9 +1154,7 @@ class WindowGroupedTable(
           propNames.map(a => Alias(a._1, a._2)).toSeq,
           aggNames.map(a => Alias(a._1, a._2)).toSeq,
           Project(projectFields, table.logicalPlan).validate(table.tableEnv)
-        ).validate(table.tableEnv),
-        // required for proper resolution of the time attribute in multi-windows
-        explicitAlias = true
+        ).validate(table.tableEnv)
       ).validate(table.tableEnv))
   }
 

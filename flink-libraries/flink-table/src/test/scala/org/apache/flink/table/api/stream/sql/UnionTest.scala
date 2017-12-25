@@ -22,10 +22,11 @@ import org.apache.flink.api.java.typeutils.GenericTypeInfo
 import org.apache.flink.api.scala._
 import org.apache.flink.table.api.Types
 import org.apache.flink.table.api.scala._
+import org.apache.flink.table.functions.ScalarFunction
 import org.apache.flink.table.runtime.utils.CommonTestData.NonPojo
 import org.apache.flink.table.utils.TableTestUtil._
 import org.apache.flink.table.utils.TableTestBase
-import org.junit.Test
+import org.junit.{Ignore, Test}
 
 class UnionTest extends TableTestBase {
 
@@ -55,6 +56,50 @@ class UnionTest extends TableTestBase {
     )
   }
 
+  @Ignore
+  @Test
+  def testUnionAll() = {
+    val streamUtil = streamTestUtil()
+    streamUtil.addTable[(Int, Int, String)]("A", 'a, 'b, 'c)
+    streamUtil.tableEnv.registerFunction("udf1", MyUDF)
+
+    val sql =
+      s"""
+         |select a1, c1, d1
+         |from
+         |(select (a + b) as a1, udf1(c) as c1, (d + 2) as d1
+         |  from
+         |  (select a, b, c, 0 as d from A
+         |    union all
+         |   select a, b, c, 1 as d from A) t
+         |  ) t1
+         |where  d1 > 2
+       """.stripMargin
+
+//    val expected = binaryNode("", "", "")
+
+    streamUtil.verifySql(sql, "")
+  }
+
+  @Test
+  def testGroupHaving() = {
+    val streamUtil = streamTestUtil()
+    streamUtil.addTable[(Int, Int, String)]("A", 'a, 'b, 'c)
+    streamUtil.tableEnv.registerFunction("udf1", MyUDF)
+
+    val sql =
+      s"""
+         |select a, c, sum(b)
+         |from A
+         |group by a, c
+         |having sum(b) + 1 > 100
+       """.stripMargin
+
+//    val expected = binaryNode("", "", "")
+
+    streamUtil.verifySql(sql, "")
+  }
+
   @Test
   def testUnionAnyType(): Unit = {
     val streamUtil = streamTestUtil()
@@ -79,5 +124,11 @@ class UnionTest extends TableTestBase {
     )
 
     streamUtil.verifyJavaSql("SELECT a FROM A UNION ALL SELECT b FROM A", expected)
+  }
+}
+
+object MyUDF extends ScalarFunction {
+  def eval(src: String): String = {
+    s"${if(null == src) 0 else src.length}:$src"
   }
 }

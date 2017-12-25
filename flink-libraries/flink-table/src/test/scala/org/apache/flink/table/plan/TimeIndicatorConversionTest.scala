@@ -245,20 +245,16 @@ class TimeIndicatorConversionTest extends TableTestBase {
       unaryNode(
         "DataStreamGroupWindowAggregate",
         unaryNode(
-          "DataStreamCalc",
-          unaryNode(
-            "DataStreamGroupWindowAggregate",
-            streamTableNode(0),
-            term("groupBy", "long"),
-            term(
-              "window",
-              TumblingGroupWindow(
-                'w,
-                'rowtime,
-                100.millis)),
-            term("select", "long", "SUM(int) AS TMP_1", "rowtime('w) AS TMP_0")
-          ),
-          term("select", "TMP_0 AS newrowtime", "long", "TMP_1 AS int")
+          "DataStreamGroupWindowAggregate",
+          streamTableNode(0),
+          term("groupBy", "long"),
+          term(
+            "window",
+            TumblingGroupWindow(
+              'w,
+              'rowtime,
+              100.millis)),
+          term("select", "long", "SUM(int) AS TMP_1", "rowtime('w) AS TMP_0")
         ),
         term("groupBy", "long"),
         term(
@@ -267,7 +263,7 @@ class TimeIndicatorConversionTest extends TableTestBase {
             'w2,
             'newrowtime,
             1000.millis)),
-        term("select", "long", "SUM(int) AS TMP_3", "end('w2) AS TMP_2")
+        term("select", "long", "SUM(TMP_1) AS TMP_3", "end('w2) AS TMP_2")
       ),
       term("select", "TMP_2", "long", "TMP_3")
     )
