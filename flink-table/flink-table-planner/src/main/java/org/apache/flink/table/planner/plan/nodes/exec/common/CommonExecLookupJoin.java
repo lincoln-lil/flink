@@ -18,10 +18,12 @@
 
 package org.apache.flink.table.planner.plan.nodes.exec.common;
 
+import org.apache.flink.annotation.Experimental;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.api.java.typeutils.RowTypeInfo;
+import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.datastream.AsyncDataStream;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
@@ -29,7 +31,6 @@ import org.apache.flink.streaming.api.functions.async.AsyncFunction;
 import org.apache.flink.streaming.api.operators.ProcessOperator;
 import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
-import org.apache.flink.streaming.api.operators.async.AsyncWaitOperatorFactory;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.catalog.DataTypeFactory;
@@ -69,6 +70,11 @@ import org.apache.flink.table.runtime.operators.join.lookup.AsyncLookupJoinRunne
 import org.apache.flink.table.runtime.operators.join.lookup.AsyncLookupJoinWithCalcRunner;
 import org.apache.flink.table.runtime.operators.join.lookup.LookupJoinRunner;
 import org.apache.flink.table.runtime.operators.join.lookup.LookupJoinWithCalcRunner;
+import org.apache.flink.table.runtime.operators.join.lookup.retry.FixedDelayRetryStrategy;
+import org.apache.flink.table.runtime.operators.join.lookup.retry.RetryStrategy;
+import org.apache.flink.table.runtime.operators.join.lookup.retry.RetryableAsyncLookupJoinRunner;
+import org.apache.flink.table.runtime.operators.join.lookup.retry.RetryableAsyncLookupJoinRunnerWithCalcRunner;
+import org.apache.flink.table.runtime.operators.join.lookup.retry.RetryableAsyncWaitOperatorFactory;
 import org.apache.flink.table.runtime.types.PlannerTypeUtils;
 import org.apache.flink.table.runtime.types.TypeInfoDataTypeConverter;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
@@ -89,12 +95,14 @@ import org.apache.commons.lang3.StringUtils;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.table.planner.calcite.FlinkTypeFactory.toLogicalType;
 import static org.apache.flink.table.planner.utils.ShortcutUtils.unwrapTypeFactory;
 import static org.apache.flink.util.Preconditions.checkArgument;
@@ -148,6 +156,38 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
     public static final String FIELD_NAME_PROJECTION_ON_TEMPORAL_TABLE =
             "projectionOnTemporalTable";
     public static final String FIELD_NAME_FILTER_ON_TEMPORAL_TABLE = "filterOnTemporalTable";
+
+    @Experimental
+    public static final ConfigOption<Integer> TABLE_EXEC_LOOKUP_MISS_RETRY_QUEUE_CAPACITY =
+            key("table.exec.lookup-miss-retry.queue-capacity")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription(
+                            "The max number of async i/o retry operation that the async lookup join can trigger.");
+
+    @Experimental
+    public static final ConfigOption<Integer> TABLE_EXEC_LOOKUP_MISS_RETRY_MAX_ATTEMPTS =
+            key("table.exec.lookup-miss-retry.max-attempts")
+                    .intType()
+                    .defaultValue(-1)
+                    .withDescription(
+                            "The async timeout for the asynchronous operation to complete.");
+
+    @Experimental
+    public static final ConfigOption<Duration> TABLE_EXEC_LOOKUP_MISS_RETRY_FIXED_DELAY =
+            key("table.exec.lookup-miss-retry.fixed-delay")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(10))
+                    .withDescription(
+                            "The async timeout for the asynchronous operation to complete.");
+
+    @Experimental
+    public static final ConfigOption<Duration> TABLE_EXEC_LOOKUP_MISS_RETRY_DEAD_LINE =
+            key("table.exec.lookup-miss-retry.dead-line")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(3))
+                    .withDescription(
+                            "The async timeout for the asynchronous operation to complete.");
 
     @JsonProperty(FIELD_NAME_JOIN_TYPE)
     private final FlinkJoinType joinType;
@@ -314,6 +354,17 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
         long asyncTimeout =
                 config.get(ExecutionConfigOptions.TABLE_EXEC_ASYNC_LOOKUP_TIMEOUT).toMillis();
 
+        int asyncRetryQueueCapacity = config.get(TABLE_EXEC_LOOKUP_MISS_RETRY_QUEUE_CAPACITY);
+        int asyncRetryMaxAttempts = config.get(TABLE_EXEC_LOOKUP_MISS_RETRY_MAX_ATTEMPTS);
+        long asyncRetryDeadLine = config.get(TABLE_EXEC_LOOKUP_MISS_RETRY_DEAD_LINE).toMillis();
+        long asyncRetryFixedDelay = config.get(TABLE_EXEC_LOOKUP_MISS_RETRY_FIXED_DELAY).toMillis();
+        RetryStrategy<RowData> retryStrategy = null;
+        // TODO test only for now
+        if (asyncRetryMaxAttempts > 0) {
+            retryStrategy =
+                    new FixedDelayRetryStrategy(asyncRetryMaxAttempts, asyncRetryFixedDelay);
+        }
+
         DataTypeFactory dataTypeFactory =
                 ShortcutUtils.unwrapContext(relBuilder).getCatalogManager().getDataTypeFactory();
 
@@ -352,6 +403,7 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
         DataStructureConverter<?, ?> fetcherConverter =
                 DataStructureConverters.getConverter(generatedFuncWithType.dataType());
         AsyncFunction<RowData, RowData> asyncFunc;
+        AsyncDataStream.OutputMode outputMode = AsyncDataStream.OutputMode.ORDERED;
         if (projectionOnTemporalTable != null) {
             // a projection or filter after table source scan
             GeneratedFunction<FlatMapFunction<RowData, RowData>> generatedCalc =
@@ -361,31 +413,62 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
                             filterOnTemporalTable,
                             temporalTableOutputType.get(),
                             tableSourceRowType);
-            asyncFunc =
-                    new AsyncLookupJoinWithCalcRunner(
-                            generatedFuncWithType.tableFunc(),
-                            (DataStructureConverter<RowData, Object>) fetcherConverter,
-                            generatedCalc,
-                            generatedResultFuture,
-                            InternalSerializers.create(rightRowType),
-                            isLeftOuterJoin,
-                            asyncBufferCapacity);
+            if (null != retryStrategy) {
+                asyncFunc =
+                        new RetryableAsyncLookupJoinRunnerWithCalcRunner(
+                                generatedFuncWithType.tableFunc(),
+                                (DataStructureConverter<RowData, Object>) fetcherConverter,
+                                generatedResultFuture,
+                                InternalSerializers.create(rightRowType),
+                                isLeftOuterJoin,
+                                asyncBufferCapacity,
+                                asyncRetryQueueCapacity,
+                                retryStrategy,
+                                generatedCalc);
+                outputMode = AsyncDataStream.OutputMode.UNORDERED;
+            } else {
+                asyncFunc =
+                        new AsyncLookupJoinWithCalcRunner(
+                                generatedFuncWithType.tableFunc(),
+                                (DataStructureConverter<RowData, Object>) fetcherConverter,
+                                generatedCalc,
+                                generatedResultFuture,
+                                InternalSerializers.create(rightRowType),
+                                isLeftOuterJoin,
+                                asyncBufferCapacity);
+            }
         } else {
             // right type is the same as table source row type, because no calc after temporal table
-            asyncFunc =
-                    new AsyncLookupJoinRunner(
-                            generatedFuncWithType.tableFunc(),
-                            (DataStructureConverter<RowData, Object>) fetcherConverter,
-                            generatedResultFuture,
-                            InternalSerializers.create(rightRowType),
-                            isLeftOuterJoin,
-                            asyncBufferCapacity);
+            if (null != retryStrategy) {
+                asyncFunc =
+                        new RetryableAsyncLookupJoinRunner(
+                                generatedFuncWithType.tableFunc(),
+                                (DataStructureConverter<RowData, Object>) fetcherConverter,
+                                generatedResultFuture,
+                                InternalSerializers.create(rightRowType),
+                                isLeftOuterJoin,
+                                asyncBufferCapacity,
+                                asyncRetryQueueCapacity,
+                                retryStrategy);
+                outputMode = AsyncDataStream.OutputMode.UNORDERED;
+            } else {
+                asyncFunc =
+                        new AsyncLookupJoinRunner(
+                                generatedFuncWithType.tableFunc(),
+                                (DataStructureConverter<RowData, Object>) fetcherConverter,
+                                generatedResultFuture,
+                                InternalSerializers.create(rightRowType),
+                                isLeftOuterJoin,
+                                asyncBufferCapacity);
+            }
         }
 
-        // force ORDERED output mode currently, optimize it to UNORDERED
-        // when the downstream do not need orderness
-        return new AsyncWaitOperatorFactory<>(
-                asyncFunc, asyncTimeout, asyncBufferCapacity, AsyncDataStream.OutputMode.ORDERED);
+        // TODO 1. add configurable allow-unordered option
+        // TODO 2. add plan validation: force fallback to ordered if unordered affect correctness
+        // force to UNORDERED if retry enabled for test
+
+        return new RetryableAsyncWaitOperatorFactory<>(
+                asyncFunc, asyncTimeout, asyncBufferCapacity, outputMode);
     }
 
     private StreamOperatorFactory<RowData> createSyncLookupJoin(

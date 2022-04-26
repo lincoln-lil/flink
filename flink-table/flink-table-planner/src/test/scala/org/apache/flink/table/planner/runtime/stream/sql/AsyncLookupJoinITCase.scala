@@ -21,6 +21,7 @@ import org.apache.flink.api.scala._
 import org.apache.flink.table.api.{TableSchema, Types}
 import org.apache.flink.table.api.bridge.scala._
 import org.apache.flink.table.planner.factories.TestValuesTableFactory
+import org.apache.flink.table.planner.plan.nodes.exec.common.CommonExecLookupJoin
 import org.apache.flink.table.planner.runtime.utils.{InMemoryLookupableTableSource, StreamingWithStateTestBase, TestingAppendSink, TestingRetractSink}
 import org.apache.flink.table.planner.runtime.utils.StreamingWithStateTestBase.{HEAP_BACKEND, ROCKSDB_BACKEND, StateBackendMode}
 import org.apache.flink.table.planner.runtime.utils.UserDefinedFunctionTestUtils._
@@ -33,6 +34,7 @@ import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 
 import java.lang.{Boolean => JBoolean}
+import java.time.Duration
 import java.util.{Collection => JCollection}
 
 import scala.collection.JavaConversions._
@@ -119,6 +121,15 @@ class AsyncLookupJoinITCase(legacyTableSource: Boolean, backend: StateBackendMod
   @Test
   def testAsyncJoinTemporalTableOnMultiKeyFields(): Unit = {
     // test left table's join key define order diffs from right's
+
+    // for test only: simulate the join hint
+    tEnv.getConfig.getConfiguration.setInteger(
+      CommonExecLookupJoin.TABLE_EXEC_LOOKUP_MISS_RETRY_MAX_ATTEMPTS, 3)
+    tEnv.getConfig.getConfiguration.setInteger(
+      CommonExecLookupJoin.TABLE_EXEC_LOOKUP_MISS_RETRY_QUEUE_CAPACITY, 10)
+    tEnv.getConfig.getConfiguration.set(
+      CommonExecLookupJoin.TABLE_EXEC_LOOKUP_MISS_RETRY_FIXED_DELAY, Duration.ofSeconds(5))
+
     val sql =
       """
         |SELECT t1.id, t1.len, D.name
