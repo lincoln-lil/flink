@@ -22,17 +22,14 @@ import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.functions.util.FunctionUtils;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.async.AsyncFunction;
-import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.conversion.DataStructureConverter;
 import org.apache.flink.table.runtime.collector.TableFunctionResultFuture;
 import org.apache.flink.table.runtime.generated.GeneratedFunction;
 import org.apache.flink.table.runtime.generated.GeneratedResultFuture;
+import org.apache.flink.table.runtime.operators.join.lookup.CalcCollectionCollector;
+import org.apache.flink.table.runtime.operators.join.lookup.TemporalTableCalcResultFuture;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
-import org.apache.flink.util.Collector;
-
-import java.util.ArrayList;
-import java.util.Collection;
 
 /** RetryableAsyncLookupJoinRunnerWithCalcRunner . */
 public class RetryableAsyncLookupJoinRunnerWithCalcRunner extends RetryableAsyncLookupJoinRunner {
@@ -77,73 +74,7 @@ public class RetryableAsyncLookupJoinRunnerWithCalcRunner extends RetryableAsync
                 generatedCalc.newInstance(getRuntimeContext().getUserCodeClassLoader());
         FunctionUtils.setFunctionRuntimeContext(calc, getRuntimeContext());
         FunctionUtils.openFunction(calc, parameters);
-        return new TemporalTableCalcResultFuture(calc, joinConditionCollector);
-    }
-
-    private class TemporalTableCalcResultFuture extends TableFunctionResultFuture<RowData> {
-
-        private static final long serialVersionUID = -6360673852888872924L;
-
-        private final FlatMapFunction<RowData, RowData> calc;
-        private final TableFunctionResultFuture<RowData> joinConditionResultFuture;
-        private final CalcCollectionCollector calcCollector = new CalcCollectionCollector();
-
-        private TemporalTableCalcResultFuture(
-                FlatMapFunction<RowData, RowData> calc,
-                TableFunctionResultFuture<RowData> joinConditionResultFuture) {
-            this.calc = calc;
-            this.joinConditionResultFuture = joinConditionResultFuture;
-        }
-
-        @Override
-        public void setInput(Object input) {
-            joinConditionResultFuture.setInput(input);
-            calcCollector.reset();
-        }
-
-        @Override
-        public void setResultFuture(ResultFuture<?> resultFuture) {
-            joinConditionResultFuture.setResultFuture(resultFuture);
-        }
-
-        @Override
-        public void complete(Collection<RowData> result) {
-            if (result == null || result.size() == 0) {
-                joinConditionResultFuture.complete(result);
-            } else {
-                for (RowData row : result) {
-                    try {
-                        calc.flatMap(row, calcCollector);
-                    } catch (Exception e) {
-                        joinConditionResultFuture.completeExceptionally(e);
-                    }
-                }
-                joinConditionResultFuture.complete(calcCollector.collection);
-            }
-        }
-
-        @Override
-        public void close() throws Exception {
-            super.close();
-            joinConditionResultFuture.close();
-            FunctionUtils.closeFunction(calc);
-        }
-    }
-
-    private class CalcCollectionCollector implements Collector<RowData> {
-
-        Collection<RowData> collection;
-
-        public void reset() {
-            this.collection = new ArrayList<>();
-        }
-
-        @Override
-        public void collect(RowData record) {
-            this.collection.add(rightRowSerializer.copy(record));
-        }
-
-        @Override
-        public void close() {}
+        return new TemporalTableCalcResultFuture(
+                calc, joinConditionCollector, new CalcCollectionCollector(rightRowSerializer));
     }
 }

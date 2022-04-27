@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.runtime.operators.join.lookup.retry;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.streaming.api.datastream.AsyncDataStream;
 import org.apache.flink.streaming.api.operators.async.AsyncWaitOperator;
@@ -28,6 +29,7 @@ import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import javax.annotation.Nonnull;
 
 /** Retryable AsyncWaitOperator. */
+@Internal
 public class RetryableAsyncWaitOperator<IN, OUT> extends AsyncWaitOperator<IN, OUT> {
 
     private final RetryableAsyncFunction function;

@@ -51,6 +51,8 @@ import java.util.concurrent.TimeUnit;
  * The async join runner with retry to lookup the data in dimension table. The retry info is
  * ephemeral, not persist when snapshot state, so when failover happens, the retry operation will be
  * re-evaluated same as the new input records.
+ *
+ * <p>TODO just for a quick poc, should reorg the code with AsyncLookupJoinRunner.
  */
 public class RetryableAsyncLookupJoinRunner extends RichRetryableAsyncFunction<RowData, RowData> {
     private static final long serialVersionUID = 1L;
@@ -301,6 +303,7 @@ public class RetryableAsyncLookupJoinRunner extends RichRetryableAsyncFunction<R
         @SuppressWarnings({"unchecked", "rawtypes"})
         public void complete(Collection<Object> result) {
             // retry triggered by lookup miss
+            // TODO use RetryStrategy#resultPredicate
             if (result.isEmpty()) {
                 if (!forceStopRetry && retryStrategy.canRetry(currentAttempts)) {
                     long nextBackoffTimeMillis = retryStrategy.getBackoffTimeMillis();
@@ -368,6 +371,7 @@ public class RetryableAsyncLookupJoinRunner extends RichRetryableAsyncFunction<R
 
         @Override
         public void completeExceptionally(Throwable error) {
+            // TODO use RetryStrategy#exceptionPredicate
             realOutput.completeExceptionally(error);
         }
 

@@ -18,12 +18,14 @@
 
 package org.apache.flink.table.runtime.operators.join.lookup.retry;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.util.Preconditions;
 
 /**
  * Retry strategy which attempt to start a new lookup with a fixed backoff time in between and under
  * an attempt times bound.
  */
+@Internal
 public class FixedDelayRetryStrategy implements RetryStrategy {
     private static final long serialVersionUID = 1L;
     private final int maxAttempts;

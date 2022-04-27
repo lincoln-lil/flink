@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.runtime.operators.join.lookup.retry;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.streaming.api.datastream.AsyncDataStream;
 import org.apache.flink.streaming.api.functions.async.AsyncFunction;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperatorFactory;
@@ -29,6 +30,7 @@ import org.apache.flink.streaming.api.operators.YieldingOperatorFactory;
 import org.apache.flink.streaming.api.operators.async.AsyncWaitOperator;
 
 /** RetryableAsyncWaitOperatorFactory. */
+@Internal
 public class RetryableAsyncWaitOperatorFactory<IN, OUT> extends AbstractStreamOperatorFactory<OUT>
         implements OneInputStreamOperatorFactory<IN, OUT>, YieldingOperatorFactory<OUT> {
 

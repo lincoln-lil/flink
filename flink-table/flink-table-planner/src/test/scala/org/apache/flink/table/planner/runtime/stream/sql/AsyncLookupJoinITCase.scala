@@ -130,6 +130,15 @@ class AsyncLookupJoinITCase(legacyTableSource: Boolean, backend: StateBackendMod
     tEnv.getConfig.getConfiguration.set(
       CommonExecLookupJoin.TABLE_EXEC_LOOKUP_MISS_RETRY_FIXED_DELAY, Duration.ofSeconds(5))
 
+    /*
+      example for join hint:
+      """
+        |SELECT /*+ LOOKUP_MISS_RETRY(user_table, 3, '5 s') */ t1.id, t1.len, D.name
+        |FROM (select content, id, len, proctime FROM src AS T) t1
+        |JOIN user_table for system_time as of t1.proctime AS D
+        |ON t1.content = D.name AND t1.id = D.id
+      """.stripMargin
+    */
     val sql =
       """
         |SELECT t1.id, t1.len, D.name

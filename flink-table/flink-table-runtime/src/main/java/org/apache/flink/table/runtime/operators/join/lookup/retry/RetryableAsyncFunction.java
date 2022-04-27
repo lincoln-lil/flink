@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.runtime.operators.join.lookup.retry;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.streaming.api.functions.async.AsyncFunction;
 
 /**
@@ -25,6 +26,7 @@ import org.apache.flink.streaming.api.functions.async.AsyncFunction;
  * requirements that do some retry work, and also finish-aware that offers an prepareFinish() method
  * for cleanup works before task finished.
  */
+@Internal
 public interface RetryableAsyncFunction<IN, OUT> extends AsyncFunction<IN, OUT> {
 
     /**

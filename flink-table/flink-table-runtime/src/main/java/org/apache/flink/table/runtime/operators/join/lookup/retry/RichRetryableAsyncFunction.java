@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.runtime.operators.join.lookup.retry;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.accumulators.Accumulator;
@@ -51,6 +52,7 @@ import java.util.List;
 import java.util.Set;
 
 /** RichRetryableAsyncFunction. */
+@Internal
 public abstract class RichRetryableAsyncFunction<IN, OUT> extends AbstractRichFunction
         implements RetryableAsyncFunction<IN, OUT> {
 
