@@ -19,6 +19,7 @@
 package org.apache.flink.streaming.api.operators.async.queue;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.operators.TimestampedCollector;
 import org.apache.flink.streaming.api.operators.async.AsyncWaitOperator;
@@ -68,7 +69,7 @@ public interface StreamElementQueue<OUT> {
      *
      * @return List of currently contained {@link StreamElement}.
      */
-    List<StreamElement> values();
+    List<Tuple4<Integer, Long, Long, StreamElement>> values();
 
     /**
      * True if the queue is empty; otherwise false.
