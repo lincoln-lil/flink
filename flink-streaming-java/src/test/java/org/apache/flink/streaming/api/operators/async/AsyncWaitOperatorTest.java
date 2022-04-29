@@ -44,6 +44,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.async.AsyncFunction;
+import org.apache.flink.streaming.api.functions.async.AsyncRetryStrategy;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.functions.async.RichAsyncFunction;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
@@ -59,6 +60,8 @@ import org.apache.flink.streaming.runtime.tasks.StreamTaskMailboxTestHarness;
 import org.apache.flink.streaming.runtime.tasks.StreamTaskMailboxTestHarnessBuilder;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.TestHarnessUtil;
+import org.apache.flink.streaming.util.retryable.AsyncRetryStrategies;
+import org.apache.flink.streaming.util.retryable.RetryPredicates;
 import org.apache.flink.testutils.junit.SharedObjects;
 import org.apache.flink.testutils.junit.SharedReference;
 import org.apache.flink.util.ExceptionUtils;
@@ -272,6 +275,31 @@ public class AsyncWaitOperatorTest extends TestLogger {
         @Override
         public void timeout(Integer input, ResultFuture<Integer> resultFuture) {
             TIMED_OUT.set(true);
+        }
+    }
+
+    private static class OddInputEmptyResultAsyncFunction extends MyAbstractAsyncFunction<Integer> {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public void asyncInvoke(final Integer input, final ResultFuture<Integer> resultFuture)
+                throws Exception {
+            executorService.submit(
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                Thread.sleep(3);
+                            } catch (InterruptedException e) {
+                                throw new RuntimeException(e);
+                            }
+                            if (input % 2 == 1) {
+                                resultFuture.complete(Collections.EMPTY_LIST);
+                            } else {
+                                resultFuture.complete(Collections.singletonList(input * 2));
+                            }
+                        }
+                    });
         }
     }
 
@@ -1059,6 +1087,95 @@ public class AsyncWaitOperatorTest extends TestLogger {
         }
     }
 
+    /** Test the AsyncWaitOperator with ordered mode and processing time. */
+    @Test
+    public void testProcessingTimeOrderedWithRetry() throws Exception {
+        testProcessingTimeWithRetry(AsyncDataStream.OutputMode.ORDERED);
+    }
+
+    /** Test the AsyncWaitOperator with unordered mode and processing time. */
+    @Test
+    public void testProcessingUnorderedWithRetry() throws Exception {
+        testProcessingTimeWithRetry(AsyncDataStream.OutputMode.UNORDERED);
+    }
+
+    private void testProcessingTimeWithRetry(AsyncDataStream.OutputMode mode) throws Exception {
+        AsyncRetryStrategy asyncRetryStrategy =
+                new AsyncRetryStrategies.FixedDelayRetryStrategyBuilder(2, 10L)
+                        .ifResult(RetryPredicates.EMPTY_RESULT_PREDICATE)
+                        .build();
+        final OneInputStreamOperatorTestHarness<Integer, Integer> testHarness =
+                createTestHarnessWithRetry(
+                        new OddInputEmptyResultAsyncFunction(),
+                        TIMEOUT,
+                        6,
+                        mode,
+                        asyncRetryStrategy);
+
+        final long initialTime = 0L;
+        final Queue<Object> expectedOutput = new ArrayDeque<>();
+        final long startTime = 1;
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        testHarness.open();
+        testHarness.setProcessingTime(startTime);
+        synchronized (testHarness.getCheckpointLock()) {
+            testHarness.processElement(new StreamRecord<>(1, initialTime + 1));
+            testHarness.processElement(new StreamRecord<>(2, initialTime + 2));
+            testHarness.processElement(new StreamRecord<>(3, initialTime + 3));
+            testHarness.processElement(new StreamRecord<>(4, initialTime + 4));
+            testHarness.processElement(new StreamRecord<>(5, initialTime + 5));
+            testHarness.processElement(new StreamRecord<>(6, initialTime + 6));
+            // wait for first retry
+            executor.submit(() -> delayedSetProcessingTime(testHarness, startTime + 10, 10));
+            // wait for second retry and some elements can be complete
+            executor.submit(() -> delayedSetProcessingTime(testHarness, startTime + 20, 10));
+            testHarness.processElement(new StreamRecord<>(7, initialTime + 7));
+            executor.submit(() -> delayedSetProcessingTime(testHarness, startTime + 30, 10));
+            testHarness.processElement(new StreamRecord<>(8, initialTime + 8));
+            executor.submit(() -> delayedSetProcessingTime(testHarness, startTime + 40, 10));
+        }
+
+        expectedOutput.add(new StreamRecord<>(4, initialTime + 2));
+        expectedOutput.add(new StreamRecord<>(8, initialTime + 4));
+        expectedOutput.add(new StreamRecord<>(12, initialTime + 6));
+        expectedOutput.add(new StreamRecord<>(16, initialTime + 8));
+
+        synchronized (testHarness.getCheckpointLock()) {
+            executor.submit(() -> delayedSetProcessingTime(testHarness, startTime + 90, 50));
+            testHarness.endInput();
+            testHarness.close();
+        }
+
+        executor.shutdown();
+
+        if (mode == AsyncDataStream.OutputMode.ORDERED) {
+            TestHarnessUtil.assertOutputEquals(
+                    "ORDERED Output was not correct.", expectedOutput, testHarness.getOutput());
+        } else {
+            TestHarnessUtil.assertOutputEqualsSorted(
+                    "UNORDERED Output was not correct.",
+                    expectedOutput,
+                    testHarness.getOutput(),
+                    new StreamRecordComparator());
+        }
+        assertEquals(0, testHarness.getProcessingTimeService().getNumActiveTimers());
+    }
+
+    // simulate a threaded processing time service.
+    private void delayedSetProcessingTime(
+            OneInputStreamOperatorTestHarness testHarness, long proctime, long delay) {
+        try {
+            Thread.sleep(delay);
+            testHarness.setProcessingTime(proctime);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    // TODO add case to test snapshot & recover from both untried & tried elements.
+
     private static class CollectableFuturesAsyncFunction<IN> implements AsyncFunction<IN, IN> {
 
         private static final long serialVersionUID = -4214078239227288637L;
@@ -1143,6 +1260,20 @@ public class AsyncWaitOperatorTest extends TestLogger {
 
         return new OneInputStreamOperatorTestHarness<>(
                 new AsyncWaitOperatorFactory<>(function, timeout, capacity, outputMode),
+                IntSerializer.INSTANCE);
+    }
+
+    private static <OUT> OneInputStreamOperatorTestHarness<Integer, OUT> createTestHarnessWithRetry(
+            AsyncFunction<Integer, OUT> function,
+            long timeout,
+            int capacity,
+            AsyncDataStream.OutputMode outputMode,
+            AsyncRetryStrategy<OUT> asyncRetryStrategy)
+            throws Exception {
+
+        return new OneInputStreamOperatorTestHarness<>(
+                new AsyncWaitOperatorFactory<>(
+                        function, timeout, capacity, outputMode, asyncRetryStrategy),
                 IntSerializer.INSTANCE);
     }
 }
