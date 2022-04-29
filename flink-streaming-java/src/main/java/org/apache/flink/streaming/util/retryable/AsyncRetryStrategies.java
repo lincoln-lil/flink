@@ -67,7 +67,7 @@ public class AsyncRetryStrategies {
 
         @Override
         public boolean canRetry(int currentAttempts) {
-            return currentAttempts < maxAttempts;
+            return currentAttempts <= maxAttempts;
         }
 
         @Override
@@ -100,13 +100,13 @@ public class AsyncRetryStrategies {
             this.backoffTimeMillis = backoffTimeMillis;
         }
 
-        public FixedDelayRetryStrategyBuilder withResultRetryPredicate(
+        public FixedDelayRetryStrategyBuilder ifResult(
                 @Nonnull Predicate<Collection<OUT>> resultRetryPredicate) {
             this.resultPredicate = Optional.of(resultRetryPredicate);
             return this;
         }
 
-        public FixedDelayRetryStrategyBuilder withExceptionRetryPredicate(
+        public FixedDelayRetryStrategyBuilder ifException(
                 @Nonnull Predicate<Throwable> exceptionRetryPredicate) {
             this.exceptionPredicate = Optional.of(exceptionRetryPredicate);
             return this;

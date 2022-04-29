@@ -1102,12 +1102,12 @@ public class AsyncWaitOperatorTest extends TestLogger {
     private void testProcessingTimeWithRetry(AsyncDataStream.OutputMode mode) throws Exception {
         AsyncRetryStrategy asyncRetryStrategy =
                 new AsyncRetryStrategies.FixedDelayRetryStrategyBuilder(2, 100L)
-                        .withResultRetryPredicate(RetryPredicates.EMPTY_RESULT_PREDICATE)
+                        .ifResult(RetryPredicates.EMPTY_RESULT_PREDICATE)
                         .build();
         final OneInputStreamOperatorTestHarness<Integer, Integer> testHarness =
                 createTestHarnessWithRetry(
                         new OddInputEmptyResultAsyncFunction(),
-                        TIMEOUT * 10,
+                        TIMEOUT,
                         6,
                         mode,
                         asyncRetryStrategy);

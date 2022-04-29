@@ -18,12 +18,15 @@
 
 package org.apache.flink.streaming.api.functions.async;
 
+import org.apache.flink.annotation.PublicEvolving;
+
 import java.io.Serializable;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.function.Predicate;
 
 /** AsyncRetryStrategy. */
+@PublicEvolving
 public interface AsyncRetryStrategy<T> extends Serializable {
 
     /** whether the next attempt can happen. */

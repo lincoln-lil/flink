@@ -50,7 +50,6 @@ public class AsyncDataStream {
     }
 
     private static final int DEFAULT_QUEUE_CAPACITY = 100;
-    private static final int DEFAULT_DELAY_QUEUE_CAPACITY = 100;
 
     /**
      * Add an AsyncWaitOperator.

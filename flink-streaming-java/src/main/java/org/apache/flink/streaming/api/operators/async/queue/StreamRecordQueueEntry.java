@@ -106,7 +106,7 @@ public class StreamRecordQueueEntry<OUT> implements StreamElementQueueEntry<OUT>
     @Override
     public long getDelay(@Nonnull TimeUnit unit) {
         // must calc for current point.
-        long diff = -System.currentTimeMillis();
+        long diff = overdueTimeMillis - System.currentTimeMillis();
         return unit.convert(diff, TimeUnit.MILLISECONDS);
     }
 
