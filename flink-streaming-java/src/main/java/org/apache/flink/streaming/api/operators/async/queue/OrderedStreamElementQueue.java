@@ -19,6 +19,7 @@
 package org.apache.flink.streaming.api.operators.async.queue;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.operators.TimestampedCollector;
 import org.apache.flink.streaming.api.watermark.Watermark;
@@ -49,13 +50,21 @@ public final class OrderedStreamElementQueue<OUT> implements StreamElementQueue<
     /** Capacity of this queue. */
     private final int capacity;
 
+    /** Whether retry is enabled. */
+    private final boolean retryEnabled;
+
     /** Queue for the inserted StreamElementQueueEntries. */
     private final Queue<StreamElementQueueEntry<OUT>> queue;
 
     public OrderedStreamElementQueue(int capacity) {
+        this(capacity, false);
+    }
+
+    public OrderedStreamElementQueue(int capacity, boolean retryEnabled) {
         Preconditions.checkArgument(capacity > 0, "The capacity must be larger than 0.");
 
         this.capacity = capacity;
+        this.retryEnabled = retryEnabled;
         this.queue = new ArrayDeque<>(capacity);
     }
 
@@ -73,12 +82,24 @@ public final class OrderedStreamElementQueue<OUT> implements StreamElementQueue<
     }
 
     @Override
-    public List<StreamElement> values() {
-        List<StreamElement> list = new ArrayList<>(this.queue.size());
+    public List<Tuple4<Integer, Long, Long, StreamElement>> values() {
+        List<Tuple4<Integer, Long, Long, StreamElement>> list = new ArrayList<>(this.queue.size());
         for (StreamElementQueueEntry e : queue) {
-            list.add(e.getInputElement());
+            list.add(createTupleEntry(e));
         }
         return list;
+    }
+
+    Tuple4<Integer, Long, Long, StreamElement> createTupleEntry(StreamElementQueueEntry element) {
+        if (element.getInputElement().isRecord()) {
+            StreamRecordQueueEntry entry = (StreamRecordQueueEntry) element;
+            return Tuple4.of(
+                    entry.getCurrentAttempts(),
+                    entry.getBackoffTimeMillis(),
+                    entry.getStartTimeMillis(),
+                    entry.getInputElement());
+        }
+        return Tuple4.of(0, 0L, 0L, element.getInputElement());
     }
 
     @Override
@@ -118,6 +139,10 @@ public final class OrderedStreamElementQueue<OUT> implements StreamElementQueue<
 
     private StreamElementQueueEntry<OUT> createEntry(StreamElement streamElement) {
         if (streamElement.isRecord()) {
+            if (retryEnabled) {
+                return new StreamRecordQueueEntry<>(
+                        (StreamRecord<?>) streamElement, System.currentTimeMillis());
+            }
             return new StreamRecordQueueEntry<>((StreamRecord<?>) streamElement);
         }
         if (streamElement.isWatermark()) {

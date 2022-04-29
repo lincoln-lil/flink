@@ -19,6 +19,7 @@
 package org.apache.flink.streaming.api.operators.async.queue;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.operators.TimestampedCollector;
 import org.apache.flink.streaming.api.watermark.Watermark;
@@ -58,15 +59,22 @@ public final class UnorderedStreamElementQueue<OUT> implements StreamElementQueu
     /** Capacity of this queue. */
     private final int capacity;
 
+    /** Whether retry is enabled. */
+    private final boolean retryEnabled;
     /** Queue of queue entries segmented by watermarks. */
     private final Deque<Segment<OUT>> segments;
 
     private int numberOfEntries;
 
     public UnorderedStreamElementQueue(int capacity) {
+        this(capacity, false);
+    }
+
+    public UnorderedStreamElementQueue(int capacity, boolean retryEnabled) {
         Preconditions.checkArgument(capacity > 0, "The capacity must be larger than 0.");
 
         this.capacity = capacity;
+        this.retryEnabled = retryEnabled;
         // most likely scenario are 4 segments <elements, watermark, elements, watermark>
         this.segments = new ArrayDeque<>(4);
         this.numberOfEntries = 0;
@@ -113,9 +121,13 @@ public final class UnorderedStreamElementQueue<OUT> implements StreamElementQueu
             lastSegment = segments.getLast();
         }
 
+        long bornTime = -1L;
+        if (retryEnabled) {
+            bornTime = System.currentTimeMillis();
+        }
         // entry is bound to segment to notify it easily upon completion
         StreamElementQueueEntry<OUT> queueEntry =
-                new SegmentedStreamRecordQueueEntry<>(record, lastSegment);
+                new SegmentedStreamRecordQueueEntry<>(record, lastSegment, bornTime);
         lastSegment.add(queueEntry);
         return queueEntry;
     }
@@ -166,8 +178,8 @@ public final class UnorderedStreamElementQueue<OUT> implements StreamElementQueu
     }
 
     @Override
-    public List<StreamElement> values() {
-        List<StreamElement> list = new ArrayList<>();
+    public List<Tuple4<Integer, Long, Long, StreamElement>> values() {
+        List<Tuple4<Integer, Long, Long, StreamElement>> list = new ArrayList<>();
         for (Segment s : segments) {
             s.addPendingElements(list);
         }
@@ -188,8 +200,9 @@ public final class UnorderedStreamElementQueue<OUT> implements StreamElementQueu
     static class SegmentedStreamRecordQueueEntry<OUT> extends StreamRecordQueueEntry<OUT> {
         private final Segment<OUT> segment;
 
-        SegmentedStreamRecordQueueEntry(StreamRecord<?> inputRecord, Segment<OUT> segment) {
-            super(inputRecord);
+        SegmentedStreamRecordQueueEntry(
+                StreamRecord<?> inputRecord, Segment<OUT> segment, long bornTimeInMillis) {
+            super(inputRecord, bornTimeInMillis);
             this.segment = segment;
         }
 
@@ -248,13 +261,29 @@ public final class UnorderedStreamElementQueue<OUT> implements StreamElementQueu
          * Adds the segmentd input elements for checkpointing including completed but not yet
          * emitted elements.
          */
-        void addPendingElements(List<StreamElement> results) {
+        void addPendingElements(List<Tuple4<Integer, Long, Long, StreamElement>> results) {
             for (StreamElementQueueEntry<OUT> element : completedElements) {
-                results.add(element.getInputElement());
+                if (element.getInputElement().isRecord()) {
+                    results.add(createTupleEntry((StreamRecordQueueEntry) element));
+                } else {
+                    results.add(createTupleEntry(element.getInputElement()));
+                }
             }
             for (StreamElementQueueEntry<OUT> element : incompleteElements) {
-                results.add(element.getInputElement());
+                results.add(createTupleEntry(element.getInputElement()));
             }
+        }
+
+        Tuple4<Integer, Long, Long, StreamElement> createTupleEntry(StreamRecordQueueEntry entry) {
+            return Tuple4.of(
+                    entry.getCurrentAttempts(),
+                    entry.getBackoffTimeMillis(),
+                    entry.getStartTimeMillis(),
+                    entry.getInputElement());
+        }
+
+        Tuple4<Integer, Long, Long, StreamElement> createTupleEntry(StreamElement element) {
+            return Tuple4.of(0, 0L, 0L, element);
         }
 
         /**

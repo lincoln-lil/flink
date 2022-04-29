@@ -22,10 +22,13 @@ import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.Utils;
 import org.apache.flink.api.java.typeutils.TypeExtractor;
 import org.apache.flink.streaming.api.functions.async.AsyncFunction;
+import org.apache.flink.streaming.api.functions.async.AsyncRetryStrategy;
 import org.apache.flink.streaming.api.operators.async.AsyncWaitOperator;
 import org.apache.flink.streaming.api.operators.async.AsyncWaitOperatorFactory;
 
 import java.util.concurrent.TimeUnit;
+
+import static org.apache.flink.streaming.util.retryable.AsyncRetryStrategies.NO_RETRY_STRATEGY;
 
 /**
  * A helper class to apply {@link AsyncFunction} to a data stream.
@@ -66,7 +69,29 @@ public class AsyncDataStream {
             long timeout,
             int bufSize,
             OutputMode mode) {
+        return addOperator(in, func, timeout, bufSize, mode, NO_RETRY_STRATEGY);
+    }
 
+    /**
+     * Add an AsyncWaitOperator.
+     *
+     * @param in The {@link DataStream} where the {@link AsyncWaitOperator} will be added.
+     * @param func {@link AsyncFunction} wrapped inside {@link AsyncWaitOperator}.
+     * @param timeout for the asynchronous operation to complete
+     * @param bufSize The max number of inputs the {@link AsyncWaitOperator} can hold inside.
+     * @param mode Processing mode for {@link AsyncWaitOperator}.
+     * @param asyncRetryStrategy AsyncRetryStrategy for {@link AsyncFunction}.
+     * @param <IN> Input type.
+     * @param <OUT> Output type.
+     * @return A new {@link SingleOutputStreamOperator}
+     */
+    private static <IN, OUT> SingleOutputStreamOperator<OUT> addOperator(
+            DataStream<IN> in,
+            AsyncFunction<IN, OUT> func,
+            long timeout,
+            int bufSize,
+            OutputMode mode,
+            AsyncRetryStrategy<OUT> asyncRetryStrategy) {
         TypeInformation<OUT> outTypeInfo =
                 TypeExtractor.getUnaryOperatorReturnType(
                         func,
@@ -81,7 +106,11 @@ public class AsyncDataStream {
         // create transform
         AsyncWaitOperatorFactory<IN, OUT> operatorFactory =
                 new AsyncWaitOperatorFactory<>(
-                        in.getExecutionEnvironment().clean(func), timeout, bufSize, mode);
+                        in.getExecutionEnvironment().clean(func),
+                        timeout,
+                        bufSize,
+                        mode,
+                        asyncRetryStrategy);
 
         return in.transform("async wait operator", outTypeInfo, operatorFactory);
     }
@@ -162,5 +191,66 @@ public class AsyncDataStream {
             DataStream<IN> in, AsyncFunction<IN, OUT> func, long timeout, TimeUnit timeUnit) {
         return addOperator(
                 in, func, timeUnit.toMillis(timeout), DEFAULT_QUEUE_CAPACITY, OutputMode.ORDERED);
+    }
+
+    // ======= retryable ========
+
+    /**
+     * Add an AsyncWaitOperator with retry. The order of output stream records may be reordered.
+     *
+     * @param in Input {@link DataStream}
+     * @param func {@link AsyncFunction}
+     * @param timeout for the asynchronous operation to complete include all reattempts.
+     * @param timeUnit of the given timeout
+     * @param capacity The max number of async i/o operation that can be triggered
+     * @param asyncRetryStrategy The strategy of reattempt async i/o operation that can be triggered
+     * @param <IN> Type of input record
+     * @param <OUT> Type of output record
+     * @return A new {@link SingleOutputStreamOperator}.
+     */
+    public static <IN, OUT> SingleOutputStreamOperator<OUT> unorderedWaitWithRetry(
+            DataStream<IN> in,
+            AsyncFunction<IN, OUT> func,
+            long timeout,
+            TimeUnit timeUnit,
+            int capacity,
+            AsyncRetryStrategy asyncRetryStrategy) {
+        return addOperator(
+                in,
+                func,
+                timeUnit.toMillis(timeout),
+                capacity,
+                OutputMode.UNORDERED,
+                asyncRetryStrategy);
+    }
+
+    /**
+     * Add an AsyncWaitOperator with retry. The order to process input records is guaranteed to be
+     * the same as * input ones.
+     *
+     * @param in Input {@link DataStream}
+     * @param func {@link AsyncFunction}
+     * @param timeout for the asynchronous operation to complete include all reattempts.
+     * @param timeUnit of the given timeout
+     * @param capacity The max number of async i/o operation that can be triggered
+     * @param asyncRetryStrategy The strategy of reattempt async i/o operation that can be triggered
+     * @param <IN> Type of input record
+     * @param <OUT> Type of output record
+     * @return A new {@link SingleOutputStreamOperator}.
+     */
+    public static <IN, OUT> SingleOutputStreamOperator<OUT> orderedWaitWithRetry(
+            DataStream<IN> in,
+            AsyncFunction<IN, OUT> func,
+            long timeout,
+            TimeUnit timeUnit,
+            int capacity,
+            AsyncRetryStrategy asyncRetryStrategy) {
+        return addOperator(
+                in,
+                func,
+                timeUnit.toMillis(timeout),
+                capacity,
+                OutputMode.ORDERED,
+                asyncRetryStrategy);
     }
 }

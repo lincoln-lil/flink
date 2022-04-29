@@ -23,11 +23,16 @@ import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.api.common.typeutils.base.IntSerializer;
+import org.apache.flink.api.common.typeutils.base.LongSerializer;
+import org.apache.flink.api.java.tuple.Tuple4;
+import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.datastream.AsyncDataStream;
 import org.apache.flink.streaming.api.datastream.AsyncDataStream.OutputMode;
 import org.apache.flink.streaming.api.functions.async.AsyncFunction;
+import org.apache.flink.streaming.api.functions.async.AsyncRetryStrategy;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.AbstractUdfStreamOperator;
@@ -38,6 +43,7 @@ import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.api.operators.TimestampedCollector;
 import org.apache.flink.streaming.api.operators.async.queue.OrderedStreamElementQueue;
 import org.apache.flink.streaming.api.operators.async.queue.StreamElementQueue;
+import org.apache.flink.streaming.api.operators.async.queue.StreamRecordQueueEntry;
 import org.apache.flink.streaming.api.operators.async.queue.UnorderedStreamElementQueue;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamElement;
@@ -49,12 +55,19 @@ import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nonnull;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.DelayQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
+
+import static org.apache.flink.streaming.util.retryable.AsyncRetryStrategies.NO_RETRY_STRATEGY;
 
 /**
  * The {@link AsyncWaitOperator} allows to asynchronously process incoming stream records. For that
@@ -92,14 +105,29 @@ public class AsyncWaitOperator<IN, OUT>
     /** Timeout for the async collectors. */
     private final long timeout;
 
+    /** AsyncRetryStrategy for the async function. */
+    private final AsyncRetryStrategy<OUT> asyncRetryStrategy;
+
+    /** If the retry strategy is not no_retry. */
+    private final boolean retryEnabled;
+
     /** {@link TypeSerializer} for inputs while making snapshots. */
     private transient StreamElementSerializer<IN> inStreamElementSerializer;
 
+    private transient TupleSerializer<Tuple4<Integer, Long, Long, StreamElement>> entrySerializer;
+
     /** Recovered input stream elements. */
-    private transient ListState<StreamElement> recoveredStreamElements;
+    private transient ListState<Tuple4<Integer, Long, Long, StreamElement>> recoveredStreamElements;
 
     /** Queue, into which to store the currently in-flight stream elements. */
     private transient StreamElementQueue<OUT> queue;
+
+    /**
+     * DelayQueue only keep the reference(s) of to-retry items, they will be removed when a retry
+     * happens. The real data still stores in the workerQueue. And the max size of the queue depends
+     * on the capacity of the work queue.
+     */
+    private transient DelayQueue<StreamRecordQueueEntry<OUT>> delayQueue;
 
     /** Mailbox executor used to yield while waiting for buffers to empty. */
     private final transient MailboxExecutor mailboxExecutor;
@@ -109,11 +137,20 @@ public class AsyncWaitOperator<IN, OUT>
     /** Whether object reuse has been enabled or disabled. */
     private transient boolean isObjectReuseEnabled;
 
+    private transient Optional<Predicate<Collection<OUT>>> retryResultPredicate;
+
+    private transient Optional<Predicate<Throwable>> retryExceptionPredicate;
+
+    private transient List<StreamRecordQueueEntry<OUT>> reuseExpiredList;
+
+    private transient AtomicBoolean delayQueueAvailable;
+
     public AsyncWaitOperator(
             @Nonnull AsyncFunction<IN, OUT> asyncFunction,
             long timeout,
             int capacity,
             @Nonnull AsyncDataStream.OutputMode outputMode,
+            @Nonnull AsyncRetryStrategy<OUT> asyncRetryStrategy,
             @Nonnull ProcessingTimeService processingTimeService,
             @Nonnull MailboxExecutor mailboxExecutor) {
         super(asyncFunction);
@@ -127,6 +164,10 @@ public class AsyncWaitOperator<IN, OUT>
         this.outputMode = Preconditions.checkNotNull(outputMode, "outputMode");
 
         this.timeout = timeout;
+
+        this.asyncRetryStrategy = asyncRetryStrategy;
+
+        this.retryEnabled = asyncRetryStrategy != NO_RETRY_STRATEGY;
 
         this.processingTimeService = Preconditions.checkNotNull(processingTimeService);
 
@@ -143,17 +184,28 @@ public class AsyncWaitOperator<IN, OUT>
         this.inStreamElementSerializer =
                 new StreamElementSerializer<>(
                         getOperatorConfig().<IN>getTypeSerializerIn1(getUserCodeClassloader()));
+        this.entrySerializer =
+                new TupleSerializer<>(
+                        (Class<Tuple4<Integer, Long, Long, StreamElement>>) (Class<?>) Tuple4.class,
+                        new TypeSerializer[] {
+                            new IntSerializer(),
+                            new LongSerializer(),
+                            new LongSerializer(),
+                            inStreamElementSerializer
+                        });
 
         switch (outputMode) {
             case ORDERED:
-                queue = new OrderedStreamElementQueue<>(capacity);
+                queue = new OrderedStreamElementQueue<>(capacity, retryEnabled);
                 break;
             case UNORDERED:
-                queue = new UnorderedStreamElementQueue<>(capacity);
+                queue = new UnorderedStreamElementQueue<>(capacity, retryEnabled);
                 break;
             default:
                 throw new IllegalStateException("Unknown async mode: " + outputMode + '.');
         }
+        this.retryResultPredicate = asyncRetryStrategy.resultPredicate();
+        this.retryExceptionPredicate = asyncRetryStrategy.exceptionPredicate();
 
         this.timestampedCollector = new TimestampedCollector<>(super.output);
     }
@@ -163,11 +215,23 @@ public class AsyncWaitOperator<IN, OUT>
         super.open();
 
         this.isObjectReuseEnabled = getExecutionConfig().isObjectReuseEnabled();
+        if (retryEnabled) {
+            this.delayQueue = new DelayQueue<>();
+            this.delayQueueAvailable = new AtomicBoolean(true);
+            this.reuseExpiredList = new ArrayList<>();
+        }
 
         if (recoveredStreamElements != null) {
-            for (StreamElement element : recoveredStreamElements.get()) {
+            for (Tuple4<Integer, Long, Long, StreamElement> entry : recoveredStreamElements.get()) {
+                StreamElement element = entry.f3;
                 if (element.isRecord()) {
-                    processElement(element.<IN>asRecord());
+                    if (retryEnabled && !StreamRecordQueueEntry.isUntried(entry.f0, entry.f1)) {
+                        // has several attempts, evaluate left timeout
+                        processRestoredRetryEntry(entry);
+                    } else {
+                        // untried entry
+                        processNewInput(element.<IN>asRecord());
+                    }
                 } else if (element.isWatermark()) {
                     processWatermark(element.asWatermark());
                 } else if (element.isLatencyMarker()) {
@@ -183,8 +247,20 @@ public class AsyncWaitOperator<IN, OUT>
         }
     }
 
-    @Override
-    public void processElement(StreamRecord<IN> record) throws Exception {
+    public void processRestoredRetryEntry(Tuple4<Integer, Long, Long, StreamElement> restoredEntry)
+            throws Exception {
+        // unnecessary to copy the element since recovered from the state
+        StreamRecord<IN> element = (StreamRecord<IN>) restoredEntry.f3;
+
+        final StreamRecordQueueEntry<OUT> entry = (StreamRecordQueueEntry) addToWorkQueue(element);
+        entry.setCurrentAttempts(restoredEntry.f0);
+        entry.setBackoffTimeMillis(restoredEntry.f1);
+        entry.setStartTimeMillis(restoredEntry.f2);
+
+        tryOnce(entry);
+    }
+
+    public void processNewInput(StreamRecord<IN> record) throws Exception {
         StreamRecord<IN> element;
         // copy the element avoid the element is reused
         if (isObjectReuseEnabled) {
@@ -208,7 +284,19 @@ public class AsyncWaitOperator<IN, OUT>
     }
 
     @Override
+    public void processElement(StreamRecord<IN> record) throws Exception {
+        // check delay queue if any entry expires, then process retry first.
+        checkAndRetryAll();
+
+        // then process new input.
+        processNewInput(record);
+    }
+
+    @Override
     public void processWatermark(Watermark mark) throws Exception {
+        // check delay queue if any entry expires, then process retry first.
+        checkAndRetryAll();
+
         addToWorkQueue(mark);
 
         // watermarks are always completed
@@ -217,14 +305,51 @@ public class AsyncWaitOperator<IN, OUT>
         outputCompletedElement();
     }
 
+    private int checkAndRetryAll() throws Exception {
+        if (retryEnabled) {
+            // drain delayed queue items
+            int expires = delayQueue.drainTo(reuseExpiredList);
+            if (expires > 0) {
+                assert expires == reuseExpiredList.size();
+                for (StreamRecordQueueEntry expired : reuseExpiredList) {
+                    tryOnce(expired);
+                }
+                reuseExpiredList.clear();
+            }
+            return expires;
+        }
+        return 0;
+    }
+
+    private void tryOnce(StreamRecordQueueEntry expired) throws Exception {
+        StreamRecord<IN> element = expired.getInputElement();
+        expired.incrementAttempts();
+
+        final ResultHandler resultHandler = new ResultHandler(element, expired);
+        if (timeout > 0) {
+            long leftTime = calcLeftTimeout(expired);
+            resultHandler.registerTimeout(getProcessingTimeService(), leftTime);
+        }
+        // do not reset timeout
+        userFunction.asyncInvoke(element.getValue(), resultHandler);
+    }
+
+    private long calcLeftTimeout(StreamRecordQueueEntry entry) {
+        long leftTimeout = timeout - (System.currentTimeMillis() - entry.getStartTimeMillis());
+        if (leftTimeout > 0) {
+            return leftTimeout;
+        }
+        // no time left, use the backoff time instead
+        return entry.getBackoffTimeMillis();
+    }
+
     @Override
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
 
-        ListState<StreamElement> partitionableState =
+        ListState<Tuple4<Integer, Long, Long, StreamElement>> partitionableState =
                 getOperatorStateBackend()
-                        .getListState(
-                                new ListStateDescriptor<>(STATE_NAME, inStreamElementSerializer));
+                        .getListState(new ListStateDescriptor<>(STATE_NAME, entrySerializer));
         partitionableState.clear();
 
         try {
@@ -246,12 +371,14 @@ public class AsyncWaitOperator<IN, OUT>
         super.initializeState(context);
         recoveredStreamElements =
                 context.getOperatorStateStore()
-                        .getListState(
-                                new ListStateDescriptor<>(STATE_NAME, inStreamElementSerializer));
+                        .getListState(new ListStateDescriptor<>(STATE_NAME, entrySerializer));
     }
 
     @Override
     public void endInput() throws Exception {
+        // we should finish all delayed retry data in fight to be finished.
+        finishInFlightDelayedInputs();
+
         // we should wait here for the data in flight to be finished. the reason is that the
         // timer not in running will be forbidden to fire after this, so that when the async
         // operation is stuck, it results in deadlock due to what the timeout timer is not fired
@@ -271,15 +398,57 @@ public class AsyncWaitOperator<IN, OUT>
      * @return a handle that allows to set the result of the async computation for the given
      *     element.
      */
-    private ResultFuture<OUT> addToWorkQueue(StreamElement streamElement)
-            throws InterruptedException {
+    private ResultFuture<OUT> addToWorkQueue(StreamElement streamElement) throws Exception {
 
         Optional<ResultFuture<OUT>> queueEntry;
         while (!(queueEntry = queue.tryPut(streamElement)).isPresent()) {
-            mailboxExecutor.yield();
+            if (retryEnabled) {
+                if (delayQueue.size() > 0) {
+
+                    // if worker queue full and delay queue not empty, try to check expires and do
+                    // retry
+                    int expires = checkAndRetryAll();
+                    if (expires == 0) {
+                        // not ready, wait for a while
+                        StreamRecordQueueEntry expired = delayQueue.poll(10, TimeUnit.MILLISECONDS);
+                        if (null != expired) {
+                            tryOnce(expired);
+                        }
+                    }
+                } else {
+                    // we can't yield here because there maybe come new delayed element which is not
+                    // completed to collect
+                    mailboxExecutor.tryYield();
+                }
+            } else {
+                // here means there must come at least one complete element in some time.
+                mailboxExecutor.yield();
+            }
         }
 
         return queueEntry.get();
+    }
+
+    private void addToDelayQueue(StreamRecordQueueEntry<OUT> retryEntry) {
+        // the capacity of delayQueue is actually bounded by workerQueue
+        delayQueue.put(retryEntry);
+    }
+
+    private void finishInFlightDelayedInputs() throws Exception {
+        if (retryEnabled) {
+            synchronized (delayQueue) {
+                // disable new entries add to delay queue
+                this.delayQueueAvailable.set(false);
+            }
+            if (delayQueue.size() > 0) {
+                StreamRecordQueueEntry<OUT>[] remaining =
+                        delayQueue.toArray(new StreamRecordQueueEntry[0]);
+                for (StreamRecordQueueEntry expired : remaining) {
+                    tryOnce(expired);
+                }
+                delayQueue.clear();
+            }
+        }
     }
 
     private void waitInFlightInputsFinished() throws InterruptedException {
@@ -345,15 +514,56 @@ public class AsyncWaitOperator<IN, OUT>
         public void complete(Collection<OUT> results) {
             Preconditions.checkNotNull(
                     results, "Results must not be null, use empty collection to emit nothing");
+            if (retryEnabled) {
+                // if add to retry queue success, do not complete this task.
+                if (!completed.get() && tryAddToRetry(results, null)) {
+                    return;
+                }
+            }
 
             // already completed (exceptionally or with previous complete call from ill-written
-            // AsyncFunction), so
-            // ignore additional result
+            // AsyncFunction), so ignore additional result
             if (!completed.compareAndSet(false, true)) {
                 return;
             }
 
             processInMailbox(results);
+        }
+
+        private boolean tryAddToRetry(Collection<OUT> results, Throwable error) {
+            if (delayQueueAvailable.get() && inputRecord.isRecord()) {
+                boolean satisfy = false;
+                StreamRecordQueueEntry retryEntry = (StreamRecordQueueEntry<OUT>) resultFuture;
+                if (System.currentTimeMillis() - retryEntry.getStartTimeMillis() >= timeout) {
+                    // total cost time beyond timeout, give up retry.
+                    return false;
+                }
+                if (null != results && retryResultPredicate.isPresent()) {
+                    satisfy = (satisfy || retryResultPredicate.get().test(results));
+                }
+                if (null != error && retryExceptionPredicate.isPresent()) {
+                    satisfy = (satisfy || retryExceptionPredicate.get().test(error));
+                }
+
+                if (satisfy) {
+                    if (asyncRetryStrategy.canRetry(retryEntry.getCurrentAttempts())) {
+                        if (timeoutTimer != null) {
+                            // cancel this timer, will register for next retry
+                            timeoutTimer.cancel(true);
+                        }
+                        long nextBackoffTimeMillis = asyncRetryStrategy.getBackoffTimeMillis();
+                        // add to delay queue
+                        retryEntry.setBackoffTimeMillis(nextBackoffTimeMillis);
+                        synchronized (delayQueue) {
+                            if (delayQueueAvailable.get()) {
+                                addToDelayQueue(retryEntry);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
         }
 
         private void processInMailbox(Collection<OUT> results) {
@@ -383,6 +593,13 @@ public class AsyncWaitOperator<IN, OUT>
 
         @Override
         public void completeExceptionally(Throwable error) {
+            if (retryEnabled) {
+                // if add to retry queue success, do not fail task.
+                if (tryAddToRetry(null, error)) {
+                    return;
+                }
+            }
+
             // already completed, so ignore exception
             if (!completed.compareAndSet(false, true)) {
                 return;

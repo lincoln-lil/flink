@@ -28,6 +28,8 @@ import org.apache.flink.util.Preconditions;
 import javax.annotation.Nonnull;
 
 import java.util.Collection;
+import java.util.concurrent.Delayed;
+import java.util.concurrent.TimeUnit;
 
 /**
  * {@link StreamElementQueueEntry} implementation for {@link StreamRecord}. This class also acts as
@@ -37,13 +39,27 @@ import java.util.Collection;
  * @param <OUT> Type of the asynchronous collection result.
  */
 @Internal
-class StreamRecordQueueEntry<OUT> implements StreamElementQueueEntry<OUT> {
+public class StreamRecordQueueEntry<OUT> implements StreamElementQueueEntry<OUT>, Delayed {
     @Nonnull private final StreamRecord<?> inputRecord;
+
+    // start from 1, when this entry created, the first attempt 'will' happen (if task failure
+    // before function invoked, it will happen after recovery).
+    private int currentAttempts = 1;
+    // record initial start timestamp which can be used for total cost
+    private long startTimeMillis = 0L;
+
+    private long overdueTimeMillis;
+    private long backoffTimeMillis = 0L;
 
     private Collection<OUT> completedElements;
 
     StreamRecordQueueEntry(StreamRecord<?> inputRecord) {
         this.inputRecord = Preconditions.checkNotNull(inputRecord);
+    }
+
+    StreamRecordQueueEntry(StreamRecord<?> inputRecord, long startTimeMillis) {
+        this.inputRecord = Preconditions.checkNotNull(inputRecord);
+        this.startTimeMillis = startTimeMillis;
     }
 
     @Override
@@ -68,5 +84,61 @@ class StreamRecordQueueEntry<OUT> implements StreamElementQueueEntry<OUT> {
     @Override
     public void complete(Collection<OUT> result) {
         this.completedElements = Preconditions.checkNotNull(result);
+    }
+
+    public long getStartTimeMillis() {
+        return startTimeMillis;
+    }
+
+    public void setStartTimeMillis(long startTimeMillis) {
+        this.startTimeMillis = startTimeMillis;
+    }
+
+    public long getBackoffTimeMillis() {
+        return backoffTimeMillis;
+    }
+
+    public void setBackoffTimeMillis(@Nonnull long backoffTimeMillis) {
+        this.backoffTimeMillis = backoffTimeMillis;
+        this.overdueTimeMillis = System.currentTimeMillis() + backoffTimeMillis;
+    }
+
+    @Override
+    public long getDelay(@Nonnull TimeUnit unit) {
+        // must calc for current point.
+        long diff = overdueTimeMillis - System.currentTimeMillis();
+        return unit.convert(diff, TimeUnit.MILLISECONDS);
+    }
+
+    @Override
+    public int compareTo(@Nonnull Delayed o) {
+        if (o instanceof StreamRecordQueueEntry) {
+            StreamRecordQueueEntry oth = (StreamRecordQueueEntry) o;
+            if (this.backoffTimeMillis > oth.backoffTimeMillis) {
+                return 1;
+            } else if (this.backoffTimeMillis == oth.backoffTimeMillis) {
+                return 0;
+            } else {
+                return -1;
+            }
+        }
+        // new items are bigger by default.
+        return 1;
+    }
+
+    public int getCurrentAttempts() {
+        return currentAttempts;
+    }
+
+    public void setCurrentAttempts(int currentAttempts) {
+        this.currentAttempts = currentAttempts;
+    }
+
+    public void incrementAttempts() {
+        currentAttempts++;
+    }
+
+    public static boolean isUntried(int currentAttempts, long backoffTimeMillis) {
+        return currentAttempts == 1 && backoffTimeMillis == 0;
     }
 }
