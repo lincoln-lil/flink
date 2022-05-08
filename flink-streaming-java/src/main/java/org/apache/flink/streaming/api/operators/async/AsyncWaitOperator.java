@@ -204,8 +204,8 @@ public class AsyncWaitOperator<IN, OUT>
             default:
                 throw new IllegalStateException("Unknown async mode: " + outputMode + '.');
         }
-        this.retryResultPredicate = asyncRetryStrategy.resultPredicate();
-        this.retryExceptionPredicate = asyncRetryStrategy.exceptionPredicate();
+        this.retryResultPredicate = asyncRetryStrategy.getRetryPredicate().resultPredicate();
+        this.retryExceptionPredicate = asyncRetryStrategy.getRetryPredicate().exceptionPredicate();
 
         this.timestampedCollector = new TimestampedCollector<>(super.output);
     }
@@ -273,7 +273,8 @@ public class AsyncWaitOperator<IN, OUT>
         // add element first to the queue
         final ResultFuture<OUT> entry = addToWorkQueue(element);
 
-        final ResultHandler resultHandler = new ResultHandler(element, entry);
+        final RetryableResultHandlerDelegator resultHandler =
+                new RetryableResultHandlerDelegator(element, entry);
 
         // register a timeout for the entry if timeout is configured
         if (timeout > 0L) {
@@ -436,10 +437,8 @@ public class AsyncWaitOperator<IN, OUT>
 
     private void finishInFlightDelayedInputs() throws Exception {
         if (retryEnabled) {
-            synchronized (delayQueue) {
-                // disable new entries add to delay queue
-                this.delayQueueAvailable.set(false);
-            }
+            // disable new entries add to delay queue
+            this.delayQueueAvailable.set(false);
             if (delayQueue.size() > 0) {
                 StreamRecordQueueEntry<OUT>[] remaining =
                         delayQueue.toArray(new StreamRecordQueueEntry[0]);
@@ -487,6 +486,92 @@ public class AsyncWaitOperator<IN, OUT>
         }
     }
 
+    private class RetryableResultHandlerDelegator implements ResultFuture<OUT> {
+
+        private final ResultHandler resultHandler;
+
+        public RetryableResultHandlerDelegator(
+                StreamRecord<IN> inputRecord, ResultFuture<OUT> resultFuture) {
+            this.resultHandler = new ResultHandler(inputRecord, resultFuture);
+        }
+
+        public void registerTimeout(ProcessingTimeService processingTimeService, long timeout) {
+            resultHandler.registerTimeout(processingTimeService, timeout);
+        }
+
+        @Override
+        public void complete(Collection<OUT> results) {
+            if (retryEnabled) {
+                // if add to retry queue success, do not complete this task.
+                if (!resultHandler.completed.get() && tryAddToRetry(results, null)) {
+                    return;
+                }
+            }
+            resultHandler.complete(results);
+        }
+
+        private boolean tryAddToRetry(Collection<OUT> results, Throwable error) {
+            if (delayQueueAvailable.get() && resultHandler.inputRecord.isRecord()) {
+                boolean satisfy = false;
+                StreamRecordQueueEntry retryEntry =
+                        (StreamRecordQueueEntry<OUT>) resultHandler.resultFuture;
+                if (System.currentTimeMillis() - retryEntry.getStartTimeMillis() >= timeout) {
+                    // total cost time beyond timeout, give up retry.
+                    return false;
+                }
+                if (null != results && retryResultPredicate.isPresent()) {
+                    satisfy = (satisfy || retryResultPredicate.get().test(results));
+                }
+                if (null != error && retryExceptionPredicate.isPresent()) {
+                    satisfy = (satisfy || retryExceptionPredicate.get().test(error));
+                }
+
+                if (satisfy) {
+                    if (asyncRetryStrategy.canRetry(retryEntry.getCurrentAttempts())) {
+                        if (resultHandler.timeoutTimer != null) {
+                            // cancel this timer, will register for next retry
+                            resultHandler.timeoutTimer.cancel(true);
+                        }
+                        long nextBackoffTimeMillis = asyncRetryStrategy.getBackoffTimeMillis();
+                        // add to delay queue
+                        retryEntry.setBackoffTimeMillis(nextBackoffTimeMillis);
+                        if (delayQueueAvailable.get()) {
+                            mailboxExecutor.submit(
+                                    () -> trySubmitRetryInMailbox(results, error, retryEntry),
+                                    "try add to delay queue or give up retry");
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        private void trySubmitRetryInMailbox(
+                Collection<OUT> results, Throwable error, StreamRecordQueueEntry retryEntry) {
+            if (delayQueueAvailable.get()) {
+                addToDelayQueue(retryEntry);
+            } else {
+                if (null != results) {
+                    resultHandler.complete(results);
+                } else {
+                    resultHandler.completeExceptionally(error);
+                }
+            }
+        }
+
+        @Override
+        public void completeExceptionally(Throwable error) {
+            if (retryEnabled) {
+                // if add to retry queue success, do not fail task.
+                if (tryAddToRetry(null, error)) {
+                    return;
+                }
+            }
+            resultHandler.completeExceptionally(error);
+        }
+    }
+
     /** A handler for the results of a specific input record. */
     private class ResultHandler implements ResultFuture<OUT> {
         /** Optional timeout timer used to signal the timeout to the AsyncFunction. */
@@ -514,56 +599,15 @@ public class AsyncWaitOperator<IN, OUT>
         public void complete(Collection<OUT> results) {
             Preconditions.checkNotNull(
                     results, "Results must not be null, use empty collection to emit nothing");
-            if (retryEnabled) {
-                // if add to retry queue success, do not complete this task.
-                if (!completed.get() && tryAddToRetry(results, null)) {
-                    return;
-                }
-            }
 
             // already completed (exceptionally or with previous complete call from ill-written
-            // AsyncFunction), so ignore additional result
+            // AsyncFunction), so
+            // ignore additional result
             if (!completed.compareAndSet(false, true)) {
                 return;
             }
 
             processInMailbox(results);
-        }
-
-        private boolean tryAddToRetry(Collection<OUT> results, Throwable error) {
-            if (delayQueueAvailable.get() && inputRecord.isRecord()) {
-                boolean satisfy = false;
-                StreamRecordQueueEntry retryEntry = (StreamRecordQueueEntry<OUT>) resultFuture;
-                if (System.currentTimeMillis() - retryEntry.getStartTimeMillis() >= timeout) {
-                    // total cost time beyond timeout, give up retry.
-                    return false;
-                }
-                if (null != results && retryResultPredicate.isPresent()) {
-                    satisfy = (satisfy || retryResultPredicate.get().test(results));
-                }
-                if (null != error && retryExceptionPredicate.isPresent()) {
-                    satisfy = (satisfy || retryExceptionPredicate.get().test(error));
-                }
-
-                if (satisfy) {
-                    if (asyncRetryStrategy.canRetry(retryEntry.getCurrentAttempts())) {
-                        if (timeoutTimer != null) {
-                            // cancel this timer, will register for next retry
-                            timeoutTimer.cancel(true);
-                        }
-                        long nextBackoffTimeMillis = asyncRetryStrategy.getBackoffTimeMillis();
-                        // add to delay queue
-                        retryEntry.setBackoffTimeMillis(nextBackoffTimeMillis);
-                        synchronized (delayQueue) {
-                            if (delayQueueAvailable.get()) {
-                                addToDelayQueue(retryEntry);
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-            return false;
         }
 
         private void processInMailbox(Collection<OUT> results) {
@@ -593,13 +637,6 @@ public class AsyncWaitOperator<IN, OUT>
 
         @Override
         public void completeExceptionally(Throwable error) {
-            if (retryEnabled) {
-                // if add to retry queue success, do not fail task.
-                if (tryAddToRetry(null, error)) {
-                    return;
-                }
-            }
-
             // already completed, so ignore exception
             if (!completed.compareAndSet(false, true)) {
                 return;
@@ -619,7 +656,7 @@ public class AsyncWaitOperator<IN, OUT>
             processInMailbox(Collections.emptyList());
         }
 
-        public void registerTimeout(ProcessingTimeService processingTimeService, long timeout) {
+        private void registerTimeout(ProcessingTimeService processingTimeService, long timeout) {
             final long timeoutTimestamp =
                     timeout + processingTimeService.getCurrentProcessingTime();
 

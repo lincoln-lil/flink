@@ -18,19 +18,23 @@
 
 package org.apache.flink.streaming.api.functions.async;
 
-import org.apache.flink.annotation.PublicEvolving;
+import java.util.Collection;
+import java.util.Optional;
+import java.util.function.Predicate;
 
-import java.io.Serializable;
+/** RetryPredicate. */
+public interface AsyncRetryPredicate<T> {
 
-/** AsyncRetryStrategy. */
-@PublicEvolving
-public interface AsyncRetryStrategy<T> extends Serializable {
+    /**
+     * An Optional Java {@Predicate} that defines a condition on asyncFunction's future result which
+     * will trigger a later reattempt operation, will be called before user's ResultFuture#complete.
+     */
+    Optional<Predicate<Collection<T>>> resultPredicate();
 
-    /** whether the next attempt can happen. */
-    boolean canRetry(int currentAttempts);
-
-    /** the delay time of next attempt. */
-    long getBackoffTimeMillis();
-
-    AsyncRetryPredicate<T> getRetryPredicate();
+    /**
+     * An Optional Java {@Predicate} that defines a condition on asyncFunction's exception which
+     * will trigger a later reattempt operation, will be called before user's
+     * ResultFuture#completeExceptionally.
+     */
+    Optional<Predicate<Throwable>> exceptionPredicate();
 }

@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.util.retryable;
 
+import org.apache.flink.streaming.api.functions.async.AsyncRetryPredicate;
 import org.apache.flink.streaming.api.functions.async.AsyncRetryStrategy;
 import org.apache.flink.util.Preconditions;
 
@@ -45,6 +46,21 @@ public class AsyncRetryStrategies {
         public long getBackoffTimeMillis() {
             return -1;
         }
+
+        @Override
+        public AsyncRetryPredicate getRetryPredicate() {
+            return new AsyncRetryPredicate() {
+                @Override
+                public Optional<Predicate<Collection>> resultPredicate() {
+                    return Optional.empty();
+                }
+
+                @Override
+                public Optional<Predicate<Throwable>> exceptionPredicate() {
+                    return Optional.empty();
+                }
+            };
+        }
     }
 
     /** FixedDelayRetryStrategy. */
@@ -71,14 +87,29 @@ public class AsyncRetryStrategies {
         }
 
         @Override
-        public Optional<Predicate<Collection<OUT>>> resultPredicate() {
-            return this.resultPredicate;
+        public AsyncRetryPredicate<OUT> getRetryPredicate() {
+            return new AsyncRetryPredicate<OUT>() {
+                @Override
+                public Optional<Predicate<Collection<OUT>>> resultPredicate() {
+                    return resultPredicate;
+                }
+
+                @Override
+                public Optional<Predicate<Throwable>> exceptionPredicate() {
+                    return exceptionPredicate;
+                }
+            };
         }
 
-        @Override
-        public Optional<Predicate<Throwable>> exceptionPredicate() {
-            return this.exceptionPredicate;
-        }
+        //        @Override
+        //        public Optional<Predicate<Collection<OUT>>> resultPredicate() {
+        //            return this.resultPredicate;
+        //        }
+        //
+        //        @Override
+        //        public Optional<Predicate<Throwable>> exceptionPredicate() {
+        //            return this.exceptionPredicate;
+        //        }
 
         @Override
         public long getBackoffTimeMillis() {
