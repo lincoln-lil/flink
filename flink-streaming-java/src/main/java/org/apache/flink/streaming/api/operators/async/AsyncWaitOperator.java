@@ -94,7 +94,8 @@ public class AsyncWaitOperator<IN, OUT>
         implements OneInputStreamOperator<IN, OUT>, BoundedOneInput {
     private static final long serialVersionUID = 1L;
 
-    private static final String STATE_NAME = "_async_wait_operator_state_";
+    private static final String LEGACY_STATE_NAME = "_async_wait_operator_state_";
+    private static final String STATE_NAME = "_async_wait_operator_state_v2_";
 
     /** Capacity of the stream element queue. */
     private final int capacity;
@@ -117,6 +118,9 @@ public class AsyncWaitOperator<IN, OUT>
     private transient TupleSerializer<Tuple4<Integer, Long, Long, StreamElement>> entrySerializer;
 
     /** Recovered input stream elements. */
+    private transient ListState<StreamElement> legacyRecoveredStreamElements;
+
+    /** Recovered input stream elements with retry state. */
     private transient ListState<Tuple4<Integer, Long, Long, StreamElement>> recoveredStreamElements;
 
     /** Queue, into which to store the currently in-flight stream elements. */
@@ -221,29 +225,44 @@ public class AsyncWaitOperator<IN, OUT>
             this.reuseExpiredList = new ArrayList<>();
         }
 
+        // legacy version state first, if exists legacyRecoveredStreamElements then ignore the new
+        // version state recoveredStreamElements.
+        if (legacyRecoveredStreamElements != null) {
+            for (StreamElement element : legacyRecoveredStreamElements.get()) {
+                processRestoredElements(element);
+            }
+            legacyRecoveredStreamElements = null;
+            return;
+        }
+
         if (recoveredStreamElements != null) {
             for (Tuple4<Integer, Long, Long, StreamElement> entry : recoveredStreamElements.get()) {
                 StreamElement element = entry.f3;
-                if (element.isRecord()) {
-                    if (retryEnabled && !StreamRecordQueueEntry.isUntried(entry.f0, entry.f1)) {
-                        // has several attempts, evaluate left timeout
-                        processRestoredRetryEntry(entry);
-                    } else {
-                        // untried entry
-                        processNewInput(element.<IN>asRecord());
-                    }
-                } else if (element.isWatermark()) {
-                    processWatermark(element.asWatermark());
-                } else if (element.isLatencyMarker()) {
-                    processLatencyMarker(element.asLatencyMarker());
+                if (retryEnabled
+                        && element.isRecord()
+                        && !StreamRecordQueueEntry.isUntried(entry.f0, entry.f1)) {
+                    // has several attempts, evaluate left timeout
+                    processRestoredRetryEntry(entry);
                 } else {
-                    throw new IllegalStateException(
-                            "Unknown record type "
-                                    + element.getClass()
-                                    + " encountered while opening the operator.");
+                    processRestoredElements(element);
                 }
             }
             recoveredStreamElements = null;
+        }
+    }
+
+    private void processRestoredElements(StreamElement element) throws Exception {
+        if (element.isRecord()) {
+            processNewInput(element.<IN>asRecord());
+        } else if (element.isWatermark()) {
+            processWatermark(element.asWatermark());
+        } else if (element.isLatencyMarker()) {
+            processLatencyMarker(element.asLatencyMarker());
+        } else {
+            throw new IllegalStateException(
+                    "Unknown record type "
+                            + element.getClass()
+                            + " encountered while opening the operator.");
         }
     }
 
@@ -370,6 +389,13 @@ public class AsyncWaitOperator<IN, OUT>
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
+
+        // check if legacy state exists
+        legacyRecoveredStreamElements =
+                context.getOperatorStateStore()
+                        .getListState(
+                                new ListStateDescriptor<>(
+                                        LEGACY_STATE_NAME, inStreamElementSerializer));
         recoveredStreamElements =
                 context.getOperatorStateStore()
                         .getListState(new ListStateDescriptor<>(STATE_NAME, entrySerializer));
