@@ -19,9 +19,10 @@
 package org.apache.flink.streaming.api.operators.async.queue;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.api.java.tuple.Tuple4;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.operators.TimestampedCollector;
+import org.apache.flink.streaming.api.operators.async.AsyncAttemptStatus;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamElement;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -178,12 +179,22 @@ public final class UnorderedStreamElementQueue<OUT> implements StreamElementQueu
     }
 
     @Override
-    public List<Tuple4<Integer, Long, Long, StreamElement>> values() {
-        List<Tuple4<Integer, Long, Long, StreamElement>> list = new ArrayList<>();
+    public List<StreamElement> values() {
+        List<StreamElement> list = new ArrayList<>();
         for (Segment s : segments) {
             s.addPendingElements(list);
         }
         return list;
+    }
+
+    @Override
+    public Tuple2<List<StreamElement>, List<AsyncAttemptStatus>> retryableValues() {
+        List<StreamElement> elementsList = new ArrayList<>();
+        List<AsyncAttemptStatus> attemptStatusList = new ArrayList<>();
+        for (Segment s : segments) {
+            s.addPendingElements(elementsList, attemptStatusList);
+        }
+        return Tuple2.of(elementsList, attemptStatusList);
     }
 
     @Override
@@ -261,29 +272,31 @@ public final class UnorderedStreamElementQueue<OUT> implements StreamElementQueu
          * Adds the segmentd input elements for checkpointing including completed but not yet
          * emitted elements.
          */
-        void addPendingElements(List<Tuple4<Integer, Long, Long, StreamElement>> results) {
+        void addPendingElements(List<StreamElement> results) {
             for (StreamElementQueueEntry<OUT> element : completedElements) {
-                if (element.getInputElement().isRecord()) {
-                    results.add(createTupleEntry((StreamRecordQueueEntry) element));
-                } else {
-                    results.add(createTupleEntry(element.getInputElement()));
-                }
+                results.add(element.getInputElement());
             }
             for (StreamElementQueueEntry<OUT> element : incompleteElements) {
-                results.add(createTupleEntry(element.getInputElement()));
+                results.add(element.getInputElement());
             }
         }
 
-        Tuple4<Integer, Long, Long, StreamElement> createTupleEntry(StreamRecordQueueEntry entry) {
-            return Tuple4.of(
-                    entry.getCurrentAttempts(),
-                    entry.getBackoffTimeMillis(),
-                    entry.getStartTimeMillis(),
-                    entry.getInputElement());
-        }
-
-        Tuple4<Integer, Long, Long, StreamElement> createTupleEntry(StreamElement element) {
-            return Tuple4.of(0, 0L, 0L, element);
+        void addPendingElements(
+                List<StreamElement> elementsList, List<AsyncAttemptStatus> attemptStatusList) {
+            for (StreamElementQueueEntry<OUT> element : completedElements) {
+                elementsList.add(element.getInputElement());
+                attemptStatusList.add(AsyncAttemptStatus.EMPTY);
+            }
+            for (StreamElementQueueEntry<OUT> element : incompleteElements) {
+                elementsList.add(element.getInputElement());
+                if (element.getInputElement().isRecord()) {
+                    attemptStatusList.add(
+                            AsyncAttemptStatus.fromStreamRecordQueueEntry(
+                                    (StreamRecordQueueEntry) element));
+                } else {
+                    attemptStatusList.add(AsyncAttemptStatus.EMPTY);
+                }
+            }
         }
 
         /**

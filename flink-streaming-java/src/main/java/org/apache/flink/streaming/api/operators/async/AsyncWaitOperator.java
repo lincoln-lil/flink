@@ -22,11 +22,11 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
+import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.base.IntSerializer;
-import org.apache.flink.api.common.typeutils.base.LongSerializer;
-import org.apache.flink.api.java.tuple.Tuple4;
-import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.typeutils.PojoTypeInfo;
+import org.apache.flink.api.java.typeutils.runtime.PojoSerializer;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.datastream.AsyncDataStream;
@@ -58,6 +58,7 @@ import javax.annotation.Nonnull;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.DelayQueue;
@@ -94,8 +95,8 @@ public class AsyncWaitOperator<IN, OUT>
         implements OneInputStreamOperator<IN, OUT>, BoundedOneInput {
     private static final long serialVersionUID = 1L;
 
-    private static final String LEGACY_STATE_NAME = "_async_wait_operator_state_";
-    private static final String STATE_NAME = "_async_wait_operator_state_v2_";
+    private static final String DATA_STATE_NAME = "_async_wait_operator_state_";
+    private static final String ATTEMPT_STATE_NAME = "_async_wait_operator_attempt_state_";
 
     /** Capacity of the stream element queue. */
     private final int capacity;
@@ -115,13 +116,15 @@ public class AsyncWaitOperator<IN, OUT>
     /** {@link TypeSerializer} for inputs while making snapshots. */
     private transient StreamElementSerializer<IN> inStreamElementSerializer;
 
-    private transient TupleSerializer<Tuple4<Integer, Long, Long, StreamElement>> entrySerializer;
+    private transient PojoSerializer<AsyncAttemptStatus> attemptSerializer;
 
     /** Recovered input stream elements. */
-    private transient ListState<StreamElement> legacyRecoveredStreamElements;
+    private transient ListState<StreamElement> recoveredStreamElements;
 
-    /** Recovered input stream elements with retry state. */
-    private transient ListState<Tuple4<Integer, Long, Long, StreamElement>> recoveredStreamElements;
+    /** Recovered async attempts. */
+    private transient ListState<AsyncAttemptStatus> recoveredAttempts;
+    // TODO combine the two list state into one using an optimized serializer to reduce empty
+    // attempt info.
 
     /** Queue, into which to store the currently in-flight stream elements. */
     private transient StreamElementQueue<OUT> queue;
@@ -188,15 +191,9 @@ public class AsyncWaitOperator<IN, OUT>
         this.inStreamElementSerializer =
                 new StreamElementSerializer<>(
                         getOperatorConfig().<IN>getTypeSerializerIn1(getUserCodeClassloader()));
-        this.entrySerializer =
-                new TupleSerializer<>(
-                        (Class<Tuple4<Integer, Long, Long, StreamElement>>) (Class<?>) Tuple4.class,
-                        new TypeSerializer[] {
-                            new IntSerializer(),
-                            new LongSerializer(),
-                            new LongSerializer(),
-                            inStreamElementSerializer
-                        });
+        this.attemptSerializer =
+                ((PojoTypeInfo) Types.POJO(AsyncAttemptStatus.class))
+                        .createPojoSerializer(getExecutionConfig());
 
         switch (outputMode) {
             case ORDERED:
@@ -225,29 +222,39 @@ public class AsyncWaitOperator<IN, OUT>
             this.reuseExpiredList = new ArrayList<>();
         }
 
-        // legacy version state first, if exists legacyRecoveredStreamElements then ignore the new
-        // version state recoveredStreamElements.
-        if (legacyRecoveredStreamElements != null) {
-            for (StreamElement element : legacyRecoveredStreamElements.get()) {
-                processRestoredElements(element);
-            }
-            legacyRecoveredStreamElements = null;
-            return;
-        }
-
+        // if exists recoveredAttempts then do retry as needed and check state consistency with
+        // recoveredStreamElements.
         if (recoveredStreamElements != null) {
-            for (Tuple4<Integer, Long, Long, StreamElement> entry : recoveredStreamElements.get()) {
-                StreamElement element = entry.f3;
-                if (retryEnabled
-                        && element.isRecord()
-                        && !StreamRecordQueueEntry.isUntried(entry.f0, entry.f1)) {
-                    // has several attempts, evaluate left timeout
-                    processRestoredRetryEntry(entry);
+            Iterator<AsyncAttemptStatus> attemptsIterator = null;
+            boolean recoverRetry = false;
+            if (retryEnabled && recoveredAttempts != null) {
+                attemptsIterator = recoveredAttempts.get().iterator();
+                recoverRetry = true;
+            }
+            for (StreamElement element : recoveredStreamElements.get()) {
+                if (recoverRetry) {
+                    if (null == attemptsIterator || !attemptsIterator.hasNext()) {
+                        throw new RuntimeException(
+                                "Inconsistent state: stream elements more than attempts state. This should not happen!");
+                    }
+                    AsyncAttemptStatus asyncAttemptStatus = attemptsIterator.next();
+                    if (!asyncAttemptStatus.isUntried()) {
+                        processRestoredRetryEntry(element, asyncAttemptStatus);
+                    } else {
+                        processRestoredElements(element);
+                    }
                 } else {
                     processRestoredElements(element);
                 }
             }
+
+            // check state consistency.
+            if (attemptsIterator != null && attemptsIterator.hasNext()) {
+                throw new RuntimeException(
+                        "Inconsistent state: stream elements less than attempts state. This should not happen!");
+            }
             recoveredStreamElements = null;
+            recoveredAttempts = null;
         }
     }
 
@@ -266,20 +273,20 @@ public class AsyncWaitOperator<IN, OUT>
         }
     }
 
-    public void processRestoredRetryEntry(Tuple4<Integer, Long, Long, StreamElement> restoredEntry)
-            throws Exception {
+    private void processRestoredRetryEntry(
+            StreamElement restoredElement, AsyncAttemptStatus restoredAttempt) throws Exception {
         // unnecessary to copy the element since recovered from the state
-        StreamRecord<IN> element = (StreamRecord<IN>) restoredEntry.f3;
+        StreamRecord<IN> element = (StreamRecord<IN>) restoredElement.asRecord();
 
         final StreamRecordQueueEntry<OUT> entry = (StreamRecordQueueEntry) addToWorkQueue(element);
-        entry.setCurrentAttempts(restoredEntry.f0);
-        entry.setBackoffTimeMillis(restoredEntry.f1);
-        entry.setStartTimeMillis(restoredEntry.f2);
+        entry.setCurrentAttempts(restoredAttempt.getCurrentAttempts());
+        entry.setBackoffTimeMillis(restoredAttempt.getBackoffTimeMillis());
+        entry.setStartTimeMillis(restoredAttempt.getStartTimeMillis());
 
         tryOnce(entry);
     }
 
-    public void processNewInput(StreamRecord<IN> record) throws Exception {
+    private void processNewInput(StreamRecord<IN> record) throws Exception {
         StreamRecord<IN> element;
         // copy the element avoid the element is reused
         if (isObjectReuseEnabled) {
@@ -345,7 +352,8 @@ public class AsyncWaitOperator<IN, OUT>
         StreamRecord<IN> element = expired.getInputElement();
         expired.incrementAttempts();
 
-        final ResultHandler resultHandler = new ResultHandler(element, expired);
+        final RetryableResultHandlerDelegator resultHandler =
+                new RetryableResultHandlerDelegator(element, expired);
         if (timeout > 0) {
             long leftTime = calcLeftTimeout(expired);
             resultHandler.registerTimeout(getProcessingTimeService(), leftTime);
@@ -367,15 +375,26 @@ public class AsyncWaitOperator<IN, OUT>
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
 
-        ListState<Tuple4<Integer, Long, Long, StreamElement>> partitionableState =
+        ListState<StreamElement> partitionedElementsState =
                 getOperatorStateBackend()
-                        .getListState(new ListStateDescriptor<>(STATE_NAME, entrySerializer));
-        partitionableState.clear();
+                        .getListState(
+                                new ListStateDescriptor<>(
+                                        DATA_STATE_NAME, inStreamElementSerializer));
+        partitionedElementsState.clear();
 
+        ListState<AsyncAttemptStatus> partitionedAttemptsState =
+                getOperatorStateBackend()
+                        .getListState(
+                                new ListStateDescriptor<>(ATTEMPT_STATE_NAME, attemptSerializer));
+        partitionedAttemptsState.clear();
+
+        Tuple2<List<StreamElement>, List<AsyncAttemptStatus>> values = queue.retryableValues();
         try {
-            partitionableState.addAll(queue.values());
+            partitionedElementsState.addAll(values.f0);
+            partitionedAttemptsState.addAll(values.f1);
         } catch (Exception e) {
-            partitionableState.clear();
+            partitionedElementsState.clear();
+            partitionedAttemptsState.clear();
 
             throw new Exception(
                     "Could not add stream element queue entries to operator state "
@@ -390,15 +409,23 @@ public class AsyncWaitOperator<IN, OUT>
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
 
-        // check if legacy state exists
-        legacyRecoveredStreamElements =
+        recoveredStreamElements =
                 context.getOperatorStateStore()
                         .getListState(
                                 new ListStateDescriptor<>(
-                                        LEGACY_STATE_NAME, inStreamElementSerializer));
-        recoveredStreamElements =
+                                        DATA_STATE_NAME, inStreamElementSerializer));
+        recoveredAttempts =
                 context.getOperatorStateStore()
-                        .getListState(new ListStateDescriptor<>(STATE_NAME, entrySerializer));
+                        .getListState(
+                                new ListStateDescriptor<>(ATTEMPT_STATE_NAME, attemptSerializer));
+
+        if (recoveredAttempts != null) {
+            if (recoveredStreamElements == null) {
+                throw new RuntimeException(
+                        "Inconsistent empty stream elements state with non empty"
+                                + " attempts state. This should not happen!");
+            }
+        }
     }
 
     @Override

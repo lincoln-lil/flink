@@ -105,9 +105,7 @@ public class StreamRecordQueueEntry<OUT> implements StreamElementQueueEntry<OUT>
 
     @Override
     public long getDelay(@Nonnull TimeUnit unit) {
-        // must calc for current point.
-        long diff = overdueTimeMillis - System.currentTimeMillis();
-        return unit.convert(diff, TimeUnit.MILLISECONDS);
+        return unit.convert(overdueTimeMillis - System.currentTimeMillis(), TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -136,9 +134,5 @@ public class StreamRecordQueueEntry<OUT> implements StreamElementQueueEntry<OUT>
 
     public void incrementAttempts() {
         currentAttempts++;
-    }
-
-    public static boolean isUntried(int currentAttempts, long backoffTimeMillis) {
-        return currentAttempts == 1 && backoffTimeMillis == 0;
     }
 }

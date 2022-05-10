@@ -1150,6 +1150,8 @@ public class AsyncWaitOperatorTest extends TestLogger {
         }
     }
 
+    // TODO add case to test snapshot & recover from both untried & tried elements.
+
     private static class CollectableFuturesAsyncFunction<IN> implements AsyncFunction<IN, IN> {
 
         private static final long serialVersionUID = -4214078239227288637L;

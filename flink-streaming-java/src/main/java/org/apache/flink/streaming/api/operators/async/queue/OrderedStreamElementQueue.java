@@ -19,9 +19,10 @@
 package org.apache.flink.streaming.api.operators.async.queue;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.api.java.tuple.Tuple4;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.operators.TimestampedCollector;
+import org.apache.flink.streaming.api.operators.async.AsyncAttemptStatus;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamElement;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -82,24 +83,28 @@ public final class OrderedStreamElementQueue<OUT> implements StreamElementQueue<
     }
 
     @Override
-    public List<Tuple4<Integer, Long, Long, StreamElement>> values() {
-        List<Tuple4<Integer, Long, Long, StreamElement>> list = new ArrayList<>(this.queue.size());
+    public List<StreamElement> values() {
+        List<StreamElement> list = new ArrayList<>(this.queue.size());
         for (StreamElementQueueEntry e : queue) {
-            list.add(createTupleEntry(e));
+            list.add(e.getInputElement());
         }
         return list;
     }
 
-    Tuple4<Integer, Long, Long, StreamElement> createTupleEntry(StreamElementQueueEntry element) {
-        if (element.getInputElement().isRecord()) {
-            StreamRecordQueueEntry entry = (StreamRecordQueueEntry) element;
-            return Tuple4.of(
-                    entry.getCurrentAttempts(),
-                    entry.getBackoffTimeMillis(),
-                    entry.getStartTimeMillis(),
-                    entry.getInputElement());
+    @Override
+    public Tuple2<List<StreamElement>, List<AsyncAttemptStatus>> retryableValues() {
+        List<StreamElement> elementsList = new ArrayList<>(this.queue.size());
+        List<AsyncAttemptStatus> attemptStatusList = new ArrayList<>(this.queue.size());
+        for (StreamElementQueueEntry e : queue) {
+            elementsList.add(e.getInputElement());
+            if (e.getInputElement().isRecord()) {
+                attemptStatusList.add(
+                        AsyncAttemptStatus.fromStreamRecordQueueEntry((StreamRecordQueueEntry) e));
+            } else {
+                attemptStatusList.add(AsyncAttemptStatus.EMPTY);
+            }
         }
-        return Tuple4.of(0, 0L, 0L, element.getInputElement());
+        return Tuple2.of(elementsList, attemptStatusList);
     }
 
     @Override

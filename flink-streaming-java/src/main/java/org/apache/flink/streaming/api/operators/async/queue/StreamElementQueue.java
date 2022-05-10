@@ -19,9 +19,10 @@
 package org.apache.flink.streaming.api.operators.async.queue;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.api.java.tuple.Tuple4;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.operators.TimestampedCollector;
+import org.apache.flink.streaming.api.operators.async.AsyncAttemptStatus;
 import org.apache.flink.streaming.api.operators.async.AsyncWaitOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamElement;
 
@@ -69,7 +70,16 @@ public interface StreamElementQueue<OUT> {
      *
      * @return List of currently contained {@link StreamElement}.
      */
-    List<Tuple4<Integer, Long, Long, StreamElement>> values();
+    @Deprecated
+    List<StreamElement> values();
+
+    /**
+     * Returns the collection of {@link StreamElementQueueEntry} currently contained in this queue
+     * for checkpointing.
+     *
+     * @return List of currently contained {@link StreamElementQueueEntry}.
+     */
+    Tuple2<List<StreamElement>, List<AsyncAttemptStatus>> retryableValues();
 
     /**
      * True if the queue is empty; otherwise false.
