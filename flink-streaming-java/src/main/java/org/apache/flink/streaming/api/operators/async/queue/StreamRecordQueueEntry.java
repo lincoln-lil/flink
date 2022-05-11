@@ -28,8 +28,6 @@ import org.apache.flink.util.Preconditions;
 import javax.annotation.Nonnull;
 
 import java.util.Collection;
-import java.util.concurrent.Delayed;
-import java.util.concurrent.TimeUnit;
 
 /**
  * {@link StreamElementQueueEntry} implementation for {@link StreamRecord}. This class also acts as
@@ -39,7 +37,7 @@ import java.util.concurrent.TimeUnit;
  * @param <OUT> Type of the asynchronous collection result.
  */
 @Internal
-public class StreamRecordQueueEntry<OUT> implements StreamElementQueueEntry<OUT>, Delayed {
+public class StreamRecordQueueEntry<OUT> implements StreamElementQueueEntry<OUT> {
     @Nonnull private final StreamRecord<?> inputRecord;
 
     // start from 1, when this entry created, the first attempt 'will' happen (if task failure
@@ -47,8 +45,6 @@ public class StreamRecordQueueEntry<OUT> implements StreamElementQueueEntry<OUT>
     private int currentAttempts = 1;
     // record initial start timestamp which can be used for total cost
     private long startTimeMillis = 0L;
-
-    private long overdueTimeMillis;
     private long backoffTimeMillis = 0L;
 
     private Collection<OUT> completedElements;
@@ -100,28 +96,6 @@ public class StreamRecordQueueEntry<OUT> implements StreamElementQueueEntry<OUT>
 
     public void setBackoffTimeMillis(@Nonnull long backoffTimeMillis) {
         this.backoffTimeMillis = backoffTimeMillis;
-        this.overdueTimeMillis = System.currentTimeMillis() + backoffTimeMillis;
-    }
-
-    @Override
-    public long getDelay(@Nonnull TimeUnit unit) {
-        return unit.convert(overdueTimeMillis - System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-    }
-
-    @Override
-    public int compareTo(@Nonnull Delayed o) {
-        if (o instanceof StreamRecordQueueEntry) {
-            StreamRecordQueueEntry oth = (StreamRecordQueueEntry) o;
-            if (this.backoffTimeMillis > oth.backoffTimeMillis) {
-                return 1;
-            } else if (this.backoffTimeMillis == oth.backoffTimeMillis) {
-                return 0;
-            } else {
-                return -1;
-            }
-        }
-        // new items are bigger by default.
-        return 1;
     }
 
     public int getCurrentAttempts() {

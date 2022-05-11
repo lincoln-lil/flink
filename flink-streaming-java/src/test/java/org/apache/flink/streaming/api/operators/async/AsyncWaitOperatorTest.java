@@ -289,7 +289,7 @@ public class AsyncWaitOperatorTest extends TestLogger {
                         @Override
                         public void run() {
                             try {
-                                Thread.sleep(10);
+                                Thread.sleep(3);
                             } catch (InterruptedException e) {
                                 throw new RuntimeException(e);
                             }
@@ -1101,7 +1101,7 @@ public class AsyncWaitOperatorTest extends TestLogger {
 
     private void testProcessingTimeWithRetry(AsyncDataStream.OutputMode mode) throws Exception {
         AsyncRetryStrategy asyncRetryStrategy =
-                new AsyncRetryStrategies.FixedDelayRetryStrategyBuilder(2, 100L)
+                new AsyncRetryStrategies.FixedDelayRetryStrategyBuilder(2, 10L)
                         .ifResult(RetryPredicates.EMPTY_RESULT_PREDICATE)
                         .build();
         final OneInputStreamOperatorTestHarness<Integer, Integer> testHarness =
@@ -1114,9 +1114,12 @@ public class AsyncWaitOperatorTest extends TestLogger {
 
         final long initialTime = 0L;
         final Queue<Object> expectedOutput = new ArrayDeque<>();
+        final long startTime = 1;
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
 
         testHarness.open();
-
+        testHarness.setProcessingTime(startTime);
         synchronized (testHarness.getCheckpointLock()) {
             testHarness.processElement(new StreamRecord<>(1, initialTime + 1));
             testHarness.processElement(new StreamRecord<>(2, initialTime + 2));
@@ -1124,8 +1127,14 @@ public class AsyncWaitOperatorTest extends TestLogger {
             testHarness.processElement(new StreamRecord<>(4, initialTime + 4));
             testHarness.processElement(new StreamRecord<>(5, initialTime + 5));
             testHarness.processElement(new StreamRecord<>(6, initialTime + 6));
+            // wait for first retry
+            executor.submit(() -> delayedSetProcessingTime(testHarness, startTime + 10, 10));
+            // wait for second retry and some elements can be complete
+            executor.submit(() -> delayedSetProcessingTime(testHarness, startTime + 20, 10));
             testHarness.processElement(new StreamRecord<>(7, initialTime + 7));
+            executor.submit(() -> delayedSetProcessingTime(testHarness, startTime + 30, 10));
             testHarness.processElement(new StreamRecord<>(8, initialTime + 8));
+            executor.submit(() -> delayedSetProcessingTime(testHarness, startTime + 40, 10));
         }
 
         expectedOutput.add(new StreamRecord<>(4, initialTime + 2));
@@ -1134,9 +1143,12 @@ public class AsyncWaitOperatorTest extends TestLogger {
         expectedOutput.add(new StreamRecord<>(16, initialTime + 8));
 
         synchronized (testHarness.getCheckpointLock()) {
+            executor.submit(() -> delayedSetProcessingTime(testHarness, startTime + 90, 50));
             testHarness.endInput();
             testHarness.close();
         }
+
+        executor.shutdown();
 
         if (mode == AsyncDataStream.OutputMode.ORDERED) {
             TestHarnessUtil.assertOutputEquals(
@@ -1147,6 +1159,18 @@ public class AsyncWaitOperatorTest extends TestLogger {
                     expectedOutput,
                     testHarness.getOutput(),
                     new StreamRecordComparator());
+        }
+        assertEquals(0, testHarness.getProcessingTimeService().getNumActiveTimers());
+    }
+
+    // simulate a threaded processing time service.
+    private void delayedSetProcessingTime(
+            OneInputStreamOperatorTestHarness testHarness, long proctime, long delay) {
+        try {
+            Thread.sleep(delay);
+            testHarness.setProcessingTime(proctime);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
