@@ -608,6 +608,7 @@ public class AsyncWaitOperator<IN, OUT>
         @Override
         public void completeExceptionally(Throwable error) {
             if (retryEnabled) {
+                mailboxExecutor.submit(() -> cleanupLastRetryInMailbox(), "cleanup last retry");
                 // if add to retry queue success, do not fail task.
                 if (ifRetry(null, error)) {
                     return;
