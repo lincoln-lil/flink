@@ -582,6 +582,7 @@ public class AsyncWaitOperator<IN, OUT>
                 if (satisfy) {
                     if (asyncRetryStrategy.canRetry(retryEntry.getCurrentAttempts())) {
                         if (resultHandler.timeoutTimer != null) {
+                            // TODO cancel is not necessary here, can be reused
                             // cancel this timer, will register for next retry
                             resultHandler.timeoutTimer.cancel(true);
                         }
