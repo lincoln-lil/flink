@@ -16,21 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.flink.streaming.api.functions.async;
+package org.apache.flink.streaming.api.scala.async
 
-import org.apache.flink.annotation.PublicEvolving;
+import java.util
+import java.util.function.Predicate
 
-import java.io.Serializable;
+trait AsyncRetryPredicate[OUT] {
 
-/** AsyncRetryStrategy. */
-@PublicEvolving
-public interface AsyncRetryStrategy<OUT> extends Serializable {
+  /**
+   * An Optional Java {@Predicate } that defines a condition on asyncFunction's future result which
+   * will trigger a later reattempt operation, will be called before user's ResultFuture#complete.
+   */
+  def resultPredicate: Option[Predicate[util.Collection[OUT]]]
 
-    /** whether the next attempt can happen. */
-    boolean canRetry(int currentAttempts);
-
-    /** the delay time of next attempt. */
-    long getBackoffTimeMillis(int currentAttempts);
-
-    AsyncRetryPredicate<OUT> getRetryPredicate();
+  /**
+   * An Optional Java {@Predicate } that defines a condition on asyncFunction's exception which will
+   * trigger a later reattempt operation, will be called before user's
+   * ResultFuture#completeExceptionally.
+   */
+  def exceptionPredicate: Option[Predicate[Throwable]]
 }

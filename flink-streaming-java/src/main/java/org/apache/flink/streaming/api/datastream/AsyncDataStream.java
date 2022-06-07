@@ -197,11 +197,44 @@ public class AsyncDataStream {
     // ======= retryable ========
 
     /**
-     * Add an AsyncWaitOperator with retry. The order of output stream records may be reordered.
+     * Add an AsyncWaitOperator with an AsyncRetryStrategy to support retry of AsyncFunction. The
+     * order of output stream records may be reordered.
      *
      * @param in Input {@link DataStream}
      * @param func {@link AsyncFunction}
-     * @param timeout for the asynchronous operation to complete include all reattempts.
+     * @param timeout from first invoke to final completion of asynchronous operation, may include
+     *     multiple retries, and will be reset in case of failover
+     * @param timeUnit of the given timeout
+     * @param asyncRetryStrategy The strategy of reattempt async i/o operation that can be triggered
+     * @param <IN> Type of input record
+     * @param <OUT> Type of output record
+     * @return A new {@link SingleOutputStreamOperator}.
+     */
+    public static <IN, OUT> SingleOutputStreamOperator<OUT> unorderedWaitWithRetry(
+            DataStream<IN> in,
+            AsyncFunction<IN, OUT> func,
+            long timeout,
+            TimeUnit timeUnit,
+            AsyncRetryStrategy asyncRetryStrategy) {
+        Preconditions.checkArgument(
+                timeout > 0, "Timeout should be configured when do async with retry.");
+        return addOperator(
+                in,
+                func,
+                timeUnit.toMillis(timeout),
+                DEFAULT_QUEUE_CAPACITY,
+                OutputMode.UNORDERED,
+                asyncRetryStrategy);
+    }
+
+    /**
+     * Add an AsyncWaitOperator with an AsyncRetryStrategy to support retry of AsyncFunction. The
+     * order of output stream records may be reordered.
+     *
+     * @param in Input {@link DataStream}
+     * @param func {@link AsyncFunction}
+     * @param timeout from first invoke to final completion of asynchronous operation, may include
+     *     multiple retries, and will be reset in case of failover
      * @param timeUnit of the given timeout
      * @param capacity The max number of async i/o operation that can be triggered
      * @param asyncRetryStrategy The strategy of reattempt async i/o operation that can be triggered
@@ -228,12 +261,44 @@ public class AsyncDataStream {
     }
 
     /**
-     * Add an AsyncWaitOperator with retry. The order to process input records is guaranteed to be
-     * the same as * input ones.
+     * Add an AsyncWaitOperator with an AsyncRetryStrategy to support retry of AsyncFunction. The
+     * order to process input records is guaranteed to be the same as * input ones.
      *
      * @param in Input {@link DataStream}
      * @param func {@link AsyncFunction}
-     * @param timeout for the asynchronous operation to complete include all reattempts.
+     * @param timeout from first invoke to final completion of asynchronous operation, may include
+     *     multiple retries, and will be reset in case of failover
+     * @param timeUnit of the given timeout
+     * @param asyncRetryStrategy The strategy of reattempt async i/o operation that can be triggered
+     * @param <IN> Type of input record
+     * @param <OUT> Type of output record
+     * @return A new {@link SingleOutputStreamOperator}.
+     */
+    public static <IN, OUT> SingleOutputStreamOperator<OUT> orderedWaitWithRetry(
+            DataStream<IN> in,
+            AsyncFunction<IN, OUT> func,
+            long timeout,
+            TimeUnit timeUnit,
+            AsyncRetryStrategy asyncRetryStrategy) {
+        Preconditions.checkArgument(
+                timeout > 0, "Timeout should be configured when do async with retry.");
+        return addOperator(
+                in,
+                func,
+                timeUnit.toMillis(timeout),
+                DEFAULT_QUEUE_CAPACITY,
+                OutputMode.ORDERED,
+                asyncRetryStrategy);
+    }
+
+    /**
+     * Add an AsyncWaitOperator with an AsyncRetryStrategy to support retry of AsyncFunction. The
+     * order to process input records is guaranteed to be the same as * input ones.
+     *
+     * @param in Input {@link DataStream}
+     * @param func {@link AsyncFunction}
+     * @param timeout from first invoke to final completion of asynchronous operation, may include
+     *     multiple retries, and will be reset in case of failover
      * @param timeUnit of the given timeout
      * @param capacity The max number of async i/o operation that can be triggered
      * @param asyncRetryStrategy The strategy of reattempt async i/o operation that can be triggered

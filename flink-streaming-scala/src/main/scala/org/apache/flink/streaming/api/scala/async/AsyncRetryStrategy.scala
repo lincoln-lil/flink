@@ -16,21 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.flink.streaming.api.functions.async;
-
-import org.apache.flink.annotation.PublicEvolving;
-
-import java.io.Serializable;
+package org.apache.flink.streaming.api.scala.async
 
 /** AsyncRetryStrategy. */
-@PublicEvolving
-public interface AsyncRetryStrategy<OUT> extends Serializable {
+trait AsyncRetryStrategy[OUT] extends Serializable {
 
-    /** whether the next attempt can happen. */
-    boolean canRetry(int currentAttempts);
+  /** whether the next attempt can happen. */
+  def canRetry(currentAttempts: Int): Boolean
 
-    /** the delay time of next attempt. */
-    long getBackoffTimeMillis(int currentAttempts);
+  /** the delay time of next attempt. */
+  def getBackoffTimeMillis(currentAttempts: Int): Long
 
-    AsyncRetryPredicate<OUT> getRetryPredicate();
+  def getRetryPredicate(): AsyncRetryPredicate[OUT]
 }

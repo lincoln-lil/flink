@@ -43,7 +43,7 @@ public class AsyncRetryStrategies {
         }
 
         @Override
-        public long getBackoffTimeMillis() {
+        public long getBackoffTimeMillis(int currentAttempts) {
             return -1;
         }
 
@@ -102,7 +102,7 @@ public class AsyncRetryStrategies {
         }
 
         @Override
-        public long getBackoffTimeMillis() {
+        public long getBackoffTimeMillis(int currentAttempts) {
             return backoffTimeMillis;
         }
     }
@@ -115,8 +115,10 @@ public class AsyncRetryStrategies {
         private Optional<Predicate<Throwable>> exceptionPredicate = Optional.empty();
 
         public FixedDelayRetryStrategyBuilder(int maxAttempts, long backoffTimeMillis) {
-            Preconditions.checkArgument(maxAttempts > 0, "");
-            Preconditions.checkArgument(backoffTimeMillis > 0, "");
+            Preconditions.checkArgument(
+                    maxAttempts > 0, "maxAttempts should be greater than zero.");
+            Preconditions.checkArgument(
+                    backoffTimeMillis > 0, "backoffTimeMillis should be greater than zero.");
             this.maxAttempts = maxAttempts;
             this.backoffTimeMillis = backoffTimeMillis;
         }
@@ -176,7 +178,7 @@ public class AsyncRetryStrategies {
         }
 
         @Override
-        public long getBackoffTimeMillis() {
+        public long getBackoffTimeMillis(int currentAttempts) {
             long backoff = Math.min((long) (lastRetryDelay * multiplier), maxRetryDelay);
             this.lastRetryDelay = backoff;
             return backoff;

@@ -157,6 +157,7 @@ public class AsyncWaitOperator<IN, OUT>
 
         this.asyncRetryStrategy = asyncRetryStrategy;
 
+        // TODO check invoke from scala api without an NO_RETRY_STRATEGY
         this.retryEnabled = asyncRetryStrategy != NO_RETRY_STRATEGY;
 
         this.processingTimeService = Preconditions.checkNotNull(processingTimeService);
@@ -217,10 +218,6 @@ public class AsyncWaitOperator<IN, OUT>
             }
             recoveredStreamElements = null;
         }
-    }
-
-    private long now() {
-        return getProcessingTimeService().getCurrentProcessingTime();
     }
 
     @Override
@@ -417,11 +414,23 @@ public class AsyncWaitOperator<IN, OUT>
             if (retryEnabled) {
                 mailboxExecutor.submit(() -> cleanupLastRetryInMailbox(), "cleanup last retry");
                 // if add to retry queue success, do not complete this task.
-                if (!resultHandler.completed.get() && ifRetry(results, null)) {
+                if (!resultHandler.completed.get() && ifRetryOrCompleted(results, null)) {
                     return;
                 }
             }
             resultHandler.complete(results);
+        }
+
+        @Override
+        public void completeExceptionally(Throwable error) {
+            if (retryEnabled) {
+                mailboxExecutor.submit(() -> cleanupLastRetryInMailbox(), "cleanup last retry");
+                // if add to retry queue success, do not fail task.
+                if (ifRetryOrCompleted(null, error)) {
+                    return;
+                }
+            }
+            resultHandler.completeExceptionally(error);
         }
 
         private void cleanupLastRetryInMailbox() {
@@ -429,6 +438,67 @@ public class AsyncWaitOperator<IN, OUT>
                 // remove from delayed retry queue
                 delayedRetryHandlers.remove(this);
                 delayedRetryTimer = null;
+            }
+        }
+
+        private boolean ifRetryOrCompleted(Collection<OUT> results, Throwable error) {
+            if (delayQueueAvailable.get() && resultHandler.inputRecord.isRecord()) {
+                boolean satisfy = false;
+                StreamRecordQueueEntry retryEntry =
+                        (StreamRecordQueueEntry<OUT>) resultHandler.resultFuture;
+                // let the timeout timer do this job
+                /*if (now() - retryEntry.getStartTimeMillis() >= timeout) {
+                    // total cost time beyond timeout, give up retry.
+                    return false;
+                }*/
+                if (null != results && retryResultPredicate.isPresent()) {
+                    satisfy = (satisfy || retryResultPredicate.get().test(results));
+                }
+                if (null != error && retryExceptionPredicate.isPresent()) {
+                    satisfy = (satisfy || retryExceptionPredicate.get().test(error));
+                }
+
+                if (satisfy) {
+                    if (asyncRetryStrategy.canRetry(getCurrentAttempts())) {
+                        // do not cancel timeoutTimer, will create new retry timer for next attempt.
+                        long nextBackoffTimeMillis =
+                                asyncRetryStrategy.getBackoffTimeMillis(getCurrentAttempts());
+                        // add to delay queue
+                        setBackoffTimeMillis(nextBackoffTimeMillis);
+                        if (delayQueueAvailable.get()) {
+                            // timer thread will dispatch task to mailbox at last.
+                            // create new timer for retry
+                            mailboxExecutor.submit(
+                                    () -> trySubmitRetryInMailboxOrComplete(this, results, error),
+                                    "delayed retry or give up retry");
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        private void trySubmitRetryInMailboxOrComplete(
+                RetryableResultHandlerDelegator resultHandlerDelegator,
+                Collection<OUT> results,
+                Throwable error) {
+            if (delayQueueAvailable.get()) {
+                delayedRetryHandlers.add(resultHandlerDelegator);
+                retryInFlight.set(true);
+                final long delayedRetry =
+                        resultHandlerDelegator.getBackoffTimeMillis()
+                                + getProcessingTimeService().getCurrentProcessingTime();
+                delayedRetryTimer =
+                        processingTimeService.registerTimer(
+                                delayedRetry, timestamp -> doRetry(resultHandlerDelegator));
+            } else {
+                // give up retry
+                if (null != results) {
+                    resultHandler.complete(results);
+                } else {
+                    resultHandler.completeExceptionally(error);
+                }
             }
         }
 
@@ -450,76 +520,6 @@ public class AsyncWaitOperator<IN, OUT>
 
         private IN getInputRecord() {
             return resultHandler.inputRecord.getValue();
-        }
-
-        private boolean ifRetry(Collection<OUT> results, Throwable error) {
-            if (delayQueueAvailable.get() && resultHandler.inputRecord.isRecord()) {
-                boolean satisfy = false;
-                StreamRecordQueueEntry retryEntry =
-                        (StreamRecordQueueEntry<OUT>) resultHandler.resultFuture;
-                // let the timeout timer do this job
-                /*if (now() - retryEntry.getStartTimeMillis() >= timeout) {
-                    // total cost time beyond timeout, give up retry.
-                    return false;
-                }*/
-                if (null != results && retryResultPredicate.isPresent()) {
-                    satisfy = (satisfy || retryResultPredicate.get().test(results));
-                }
-                if (null != error && retryExceptionPredicate.isPresent()) {
-                    satisfy = (satisfy || retryExceptionPredicate.get().test(error));
-                }
-
-                if (satisfy) {
-                    if (asyncRetryStrategy.canRetry(getCurrentAttempts())) {
-                        // do not cancel timeoutTimer, will create new retry timer for next attempt.
-                        long nextBackoffTimeMillis = asyncRetryStrategy.getBackoffTimeMillis();
-                        // add to delay queue
-                        setBackoffTimeMillis(nextBackoffTimeMillis);
-                        if (delayQueueAvailable.get()) {
-                            // timer thread will dispatch task to mailbox at last.
-                            // create new timer for retry
-                            mailboxExecutor.submit(
-                                    () -> trySubmitRetryInMailbox(this, results, error),
-                                    "delayed retry or give up retry");
-                            return true;
-                        }
-                    }
-                }
-            }
-            return false;
-        }
-
-        private void trySubmitRetryInMailbox(
-                RetryableResultHandlerDelegator resultHandlerDelegator,
-                Collection<OUT> results,
-                Throwable error) {
-            if (delayQueueAvailable.get()) {
-                delayedRetryHandlers.add(resultHandlerDelegator);
-                retryInFlight.set(true);
-                final long delayedRetry = resultHandlerDelegator.getBackoffTimeMillis() + now();
-                delayedRetryTimer =
-                        processingTimeService.registerTimer(
-                                delayedRetry, timestamp -> doRetry(resultHandlerDelegator));
-            } else {
-                // give up retry
-                if (null != results) {
-                    resultHandler.complete(results);
-                } else {
-                    resultHandler.completeExceptionally(error);
-                }
-            }
-        }
-
-        @Override
-        public void completeExceptionally(Throwable error) {
-            if (retryEnabled) {
-                mailboxExecutor.submit(() -> cleanupLastRetryInMailbox(), "cleanup last retry");
-                // if add to retry queue success, do not fail task.
-                if (ifRetry(null, error)) {
-                    return;
-                }
-            }
-            resultHandler.completeExceptionally(error);
         }
     }
 

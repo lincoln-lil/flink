@@ -23,13 +23,13 @@ import java.util.Optional;
 import java.util.function.Predicate;
 
 /** RetryPredicate. */
-public interface AsyncRetryPredicate<T> {
+public interface AsyncRetryPredicate<OUT> {
 
     /**
      * An Optional Java {@Predicate} that defines a condition on asyncFunction's future result which
      * will trigger a later reattempt operation, will be called before user's ResultFuture#complete.
      */
-    Optional<Predicate<Collection<T>>> resultPredicate();
+    Optional<Predicate<Collection<OUT>>> resultPredicate();
 
     /**
      * An Optional Java {@Predicate} that defines a condition on asyncFunction's exception which
