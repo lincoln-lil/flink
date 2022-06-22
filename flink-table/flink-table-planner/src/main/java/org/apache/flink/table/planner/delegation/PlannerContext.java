@@ -286,15 +286,24 @@ public class PlannerContext {
         return JavaScalaConversionUtil.<SqlToRelConverter.Config>toJava(
                         getCalciteConfig().getSqlToRelConverterConfig())
                 .orElseGet(
-                        () ->
-                                SqlToRelConverter.config()
-                                        .withTrimUnusedFields(false)
-                                        .withHintStrategyTable(
-                                                FlinkHintStrategies.createHintStrategyTable())
-                                        .withInSubQueryThreshold(Integer.MAX_VALUE)
-                                        .withExpand(false)
-                                        .withRelBuilderFactory(
-                                                FlinkRelFactories.FLINK_REL_BUILDER()));
+                        () -> {
+                            SqlToRelConverter.Config config =
+                                    SqlToRelConverter.config()
+                                            .withTrimUnusedFields(false)
+                                            .withHintStrategyTable(
+                                                    FlinkHintStrategies.createHintStrategyTable())
+                                            .withInSubQueryThreshold(Integer.MAX_VALUE)
+                                            .withExpand(false)
+                                            .withRelBuilderFactory(
+                                                    FlinkRelFactories.FLINK_REL_BUILDER());
+                            // disable project merge & join condition push down during sql2rel
+                            // phase, let it be done by the optimizer later.
+                            config = config.addRelBuilderConfigTransform(c -> c.withBloat(-1));
+                            config =
+                                    config.addRelBuilderConfigTransform(
+                                            c -> c.withPushJoinCondition(false));
+                            return config;
+                        });
     }
 
     /** Returns the operator table for this environment including a custom Calcite configuration. */
