@@ -46,7 +46,7 @@ class StreamPhysicalSink(
     contextResolvedTable: ContextResolvedTable,
     tableSink: DynamicTableSink,
     abilitySpecs: Array[SinkAbilitySpec],
-    upsertMaterialize: Boolean = false)
+    val upsertMaterialize: Boolean = false)
   extends Sink(cluster, traitSet, inputRel, hints, contextResolvedTable, tableSink)
   with StreamPhysicalRel {
 

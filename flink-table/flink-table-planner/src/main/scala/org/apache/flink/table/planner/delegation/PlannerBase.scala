@@ -63,7 +63,6 @@ import org.apache.calcite.plan.{RelTrait, RelTraitDef}
 import org.apache.calcite.rel.RelNode
 import org.apache.calcite.rel.hint.RelHint
 import org.apache.calcite.rel.logical.LogicalTableModify
-import org.apache.calcite.tools.FrameworkConfig
 
 import java.lang.{Long => JLong}
 import java.util
@@ -323,10 +322,14 @@ abstract class PlannerBase(
     }
 
     require(optimizedRelNodes.forall(_.isInstanceOf[FlinkPhysicalRel]))
+    val physicalRel = optimizedRelNodes.map(_.asInstanceOf[FlinkPhysicalRel])
+
+    val validatedPhysicalRel = validatePhysicalPlan(physicalRel, tableConfig)
+
     // Rewrite same rel object to different rel objects
     // in order to get the correct dag (dag reuse is based on object not digest)
     val shuttle = new SameRelObjectShuttle()
-    val relsWithoutSameObj = optimizedRelNodes.map(_.accept(shuttle))
+    val relsWithoutSameObj = validatedPhysicalRel.map(_.accept(shuttle))
     // reuse subplan
     val reusedPlan = SubplanReuser.reuseDuplicatedSubplan(relsWithoutSameObj, tableConfig)
     // convert FlinkPhysicalRel DAG to ExecNodeGraph
@@ -338,6 +341,10 @@ abstract class PlannerBase(
     val processors = getExecNodeGraphProcessors
     processors.foldLeft(execGraph)((graph, processor) => processor.process(graph, context))
   }
+
+  protected def validatePhysicalPlan(
+      physicalRelNodes: Seq[FlinkPhysicalRel],
+      tableConfig: TableConfig): Seq[FlinkPhysicalRel]
 
   protected def getExecNodeGraphProcessors: Seq[ExecNodeGraphProcessor]
 

@@ -22,7 +22,7 @@ import org.apache.flink.table.planner.plan.nodes.exec.{ExecNode, InputProperty}
 import org.apache.flink.table.planner.plan.nodes.exec.spec.TemporalTableSourceSpec
 import org.apache.flink.table.planner.plan.nodes.exec.stream.StreamExecLookupJoin
 import org.apache.flink.table.planner.plan.nodes.physical.common.CommonPhysicalLookupJoin
-import org.apache.flink.table.planner.plan.utils.{FlinkRexUtil, JoinTypeUtil}
+import org.apache.flink.table.planner.plan.utils.{FlinkRexUtil, JoinTypeUtil, RelDescriptionWriterImpl}
 import org.apache.flink.table.planner.utils.JavaScalaConversionUtil
 import org.apache.flink.table.planner.utils.ShortcutUtils.unwrapTableConfig
 
@@ -31,6 +31,7 @@ import org.apache.calcite.rel.RelNode
 import org.apache.calcite.rel.core.{JoinInfo, JoinRelType}
 import org.apache.calcite.rex.RexProgram
 
+import java.io.{PrintWriter, StringWriter}
 import java.util
 
 import scala.collection.JavaConverters._
@@ -43,7 +44,8 @@ class StreamPhysicalLookupJoin(
     temporalTable: RelOptTable,
     tableCalcProgram: Option[RexProgram],
     joinInfo: JoinInfo,
-    joinType: JoinRelType)
+    joinType: JoinRelType,
+    val materialize: Boolean = false)
   extends CommonPhysicalLookupJoin(
     cluster,
     traitSet,
@@ -67,6 +69,18 @@ class StreamPhysicalLookupJoin(
       joinType)
   }
 
+  def copy(materialize: Boolean): StreamPhysicalLookupJoin = {
+    new StreamPhysicalLookupJoin(
+      cluster,
+      traitSet,
+      input,
+      temporalTable,
+      tableCalcProgram,
+      joinInfo,
+      joinType,
+      materialize)
+  }
+
   override def translateToExecNode(): ExecNode[_] = {
     val (projectionOnTemporalTable, filterOnTemporalTable) = calcOnTemporalTable match {
       case Some(program) =>
@@ -85,7 +99,17 @@ class StreamPhysicalLookupJoin(
       filterOnTemporalTable,
       InputProperty.DEFAULT,
       FlinkTypeFactory.toLogicalRowType(getRowType),
-      getRelDetailedDescription)
+      materialize,
+      getDescriptionWithMaterialize(materialize))
   }
 
+  def getDescriptionWithMaterialize(materialize: Boolean): String = {
+    val sw = new StringWriter
+    val pw = new PrintWriter(sw)
+    val relWriter = new RelDescriptionWriterImpl(pw)
+    this.explainTerms(relWriter)
+    relWriter.itemIf("materialize", "true", materialize)
+    relWriter.done(this)
+    sw.toString
+  }
 }

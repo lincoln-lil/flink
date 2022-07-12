@@ -76,7 +76,7 @@ import scala.collection.mutable
 abstract class CommonPhysicalLookupJoin(
     cluster: RelOptCluster,
     traitSet: RelTraitSet,
-    input: RelNode,
+    val input: RelNode,
     // TODO: refactor this into TableSourceTable, once legacy TableSource is removed
     temporalTable: RelOptTable,
     val calcOnTemporalTable: Option[RexProgram],

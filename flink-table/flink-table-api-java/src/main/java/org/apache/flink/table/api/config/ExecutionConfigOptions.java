@@ -491,6 +491,22 @@ public class ExecutionConfigOptions {
                                     + "We strongly suggest to keep this flag disabled, as this flag is going to be removed in the next releases. "
                                     + "If you have a pipeline relying on the old behavior, please create a new pipeline and regenerate the operators state.");
 
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<NonDeterministicUpdateHandling>
+            TABLE_EXEC_NONDETERMINISTIC_UPDATE_HANDLING =
+                    key("table.exec.non-deterministic-update.handling")
+                            .enumType(NonDeterministicUpdateHandling.class)
+                            .defaultValue(NonDeterministicUpdateHandling.ERROR)
+                            .withDescription("");
+
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<NondeterministicUpdateMaterialize>
+            TABLE_EXEC_NONDETERMINISTIC_UPDATE_MATERIALIZE =
+                    key("table.exec.non-deterministic-update.materialize")
+                            .enumType(NondeterministicUpdateMaterialize.class)
+                            .defaultValue(NondeterministicUpdateMaterialize.ALL)
+                            .withDescription("");
+
     // ------------------------------------------------------------------------------------------
     // Enum option types
     // ------------------------------------------------------------------------------------------
@@ -571,6 +587,41 @@ public class ExecutionConfigOptions {
 
         /** Add keyed shuffle in any case except single parallelism. */
         FORCE
+    }
+
+    /** Strategy for handling non-deterministic updates. */
+    @PublicEvolving
+    public enum NonDeterministicUpdateHandling {
+
+        /** Report an error if exist non-deterministic updates. */
+        ERROR,
+
+        /** Do nothing if exist non-deterministic updates, the risk of wrong result still exists. */
+        IGNORE,
+
+        /**
+         * Resolve by auto adjusting execution plan and/or adding proper materialization for
+         * non-deterministic update operations.
+         */
+        RESOLVE_ALL,
+
+        RESOLVE_FUNCTION_CALL_ONLY,
+
+        RESOLVE_LOOKUP_JOIN_ONLY
+    }
+
+    /** Materializing strategy for resolving non-deterministic updates. */
+    @PublicEvolving
+    public enum NondeterministicUpdateMaterialize {
+
+        /** Add UpdateMaterialization for all nondeterministic operators. */
+        ALL,
+
+        /** Add UpdateMaterialization only for nondeterministic functions. */
+        FUNCTION_CALL_ONLY,
+
+        /** Add UpdateMaterialization for temporal table lookup join. */
+        LOOKUP_JOIN_ONLY
     }
 
     /** Determine if CAST operates using the legacy behaviour or the new one. */

@@ -31,6 +31,7 @@ import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeGraph
 import org.apache.flink.table.planner.plan.nodes.exec.batch.BatchExecNode
 import org.apache.flink.table.planner.plan.nodes.exec.processor.{DeadlockBreakupProcessor, ExecNodeGraphProcessor, ForwardHashExchangeProcessor, MultipleInputNodeCreationProcessor}
 import org.apache.flink.table.planner.plan.nodes.exec.utils.ExecNodePlanDumper
+import org.apache.flink.table.planner.plan.nodes.physical.FlinkPhysicalRel
 import org.apache.flink.table.planner.plan.optimize.{BatchCommonSubGraphBasedOptimizer, Optimizer}
 import org.apache.flink.table.planner.plan.utils.FlinkRelOptUtil
 import org.apache.flink.table.planner.utils.DummyStreamExecutionEnvironment
@@ -67,6 +68,10 @@ class BatchPlanner(
   }
 
   override protected def getOptimizer: Optimizer = new BatchCommonSubGraphBasedOptimizer(this)
+
+  override protected def validatePhysicalPlan(
+      physicalRelNodes: Seq[FlinkPhysicalRel],
+      tableConfig: TableConfig): Seq[FlinkPhysicalRel] = physicalRelNodes
 
   override protected def getExecNodeGraphProcessors: Seq[ExecNodeGraphProcessor] = {
     val processors = new util.ArrayList[ExecNodeGraphProcessor]()
