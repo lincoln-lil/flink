@@ -144,10 +144,6 @@ public class StreamExecLookupJoin extends CommonExecLookupJoin implements Stream
     public Transformation<RowData> translateToPlanInternal(
             PlannerBase planner, ExecNodeConfig config) {
         return createJoinTransformation(
-                planner,
-                config,
-                ChangelogMode.insertOnly(),
-                upsertMaterialize,
-                lookupKeyContainsPrimaryKey);
+                planner, config, upsertMaterialize, lookupKeyContainsPrimaryKey);
     }
 }

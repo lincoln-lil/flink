@@ -75,6 +75,6 @@ public class BatchExecLookupJoin extends CommonExecLookupJoin implements BatchEx
             PlannerBase planner, ExecNodeConfig config) {
         // There's no optimization when lookupKeyContainsPrimaryKey is true for batch, so set it to
         // false for now. We can add it to CommonExecLookupJoin when needed.
-        return createJoinTransformation(planner, config, ChangelogMode.insertOnly(), false, false);
+        return createJoinTransformation(planner, config, false, false);
     }
 }
