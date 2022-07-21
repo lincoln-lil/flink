@@ -44,7 +44,7 @@ class StreamPhysicalLookupJoin(
     tableCalcProgram: Option[RexProgram],
     joinInfo: JoinInfo,
     joinType: JoinRelType,
-    upsertMaterialize: Boolean = false)
+    val upsertMaterialize: Boolean = false)
   extends CommonPhysicalLookupJoin(
     cluster,
     traitSet,

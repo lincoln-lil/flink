@@ -317,4 +317,12 @@ class StreamCommonSubGraphBasedOptimizer(planner: StreamPlanner)
     }
   }
 
+  /**
+   * Post process for the physical [[RelNode]] dag, e.g., can be overloaded for validation or
+   * rewriting purpose.
+   */
+  override protected def postOptimize(expanded: Seq[RelNode]): Seq[RelNode] = {
+
+    expanded
+  }
 }

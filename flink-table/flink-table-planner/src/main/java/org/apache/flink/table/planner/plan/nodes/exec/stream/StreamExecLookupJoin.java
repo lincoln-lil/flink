@@ -54,7 +54,6 @@ import java.util.Map;
         minPlanVersion = FlinkVersion.v1_15,
         minStateVersion = FlinkVersion.v1_15)
 public class StreamExecLookupJoin extends CommonExecLookupJoin implements StreamExecNode<RowData> {
-
     public static final String FIELD_NAME_REQUIRE_UPSERT_MATERIALIZE = "requireUpsertMaterialize";
 
     public static final String FIELD_NAME_LOOKUP_KEY_CONTAINS_PRIMARY_KEY =

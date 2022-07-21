@@ -42,7 +42,7 @@ class StreamPhysicalWindowDeduplicate(
     cluster: RelOptCluster,
     traitSet: RelTraitSet,
     inputRel: RelNode,
-    partitionKeys: Array[Int],
+    val partitionKeys: Array[Int],
     orderKey: Int,
     keepLastRow: Boolean,
     windowing: WindowingStrategy)
