@@ -69,7 +69,7 @@ import scala.collection.mutable
  * records <br> 3) join left input record and lookup-ed records <br> 4) only outputs the rows which
  * match to the remainingCondition <br>
  *
- * @param input
+ * @param inputRel
  *   input rel node
  * @param calcOnTemporalTable
  *   the calc (projection&filter) after table scan before joining
@@ -77,13 +77,13 @@ import scala.collection.mutable
 abstract class CommonPhysicalLookupJoin(
     cluster: RelOptCluster,
     traitSet: RelTraitSet,
-    input: RelNode,
+    inputRel: RelNode,
     // TODO: refactor this into TableSourceTable, once legacy TableSource is removed
     val temporalTable: RelOptTable,
     val calcOnTemporalTable: Option[RexProgram],
     val joinInfo: JoinInfo,
     val joinType: JoinRelType)
-  extends SingleRel(cluster, traitSet, input)
+  extends SingleRel(cluster, traitSet, inputRel)
   with FlinkRelNode {
 
   val allLookupKeys: Map[Int, LookupKey] = {
@@ -95,7 +95,7 @@ abstract class CommonPhysicalLookupJoin(
   // remaining condition used to filter the joined records (left input record X lookup-ed records)
   val remainingCondition: Option[RexNode] = getRemainingJoinCondition(
     cluster.getRexBuilder,
-    input.getRowType,
+    inputRel.getRowType,
     calcOnTemporalTable,
     allLookupKeys.values.toList,
     joinInfo)
@@ -115,7 +115,7 @@ abstract class CommonPhysicalLookupJoin(
       temporalTable.getRowType
     }
     SqlValidatorUtil.deriveJoinRowType(
-      input.getRowType,
+      inputRel.getRowType,
       rightType,
       joinType,
       flinkTypeFactory,
@@ -124,7 +124,7 @@ abstract class CommonPhysicalLookupJoin(
   }
 
   override def explainTerms(pw: RelWriter): RelWriter = {
-    val inputFieldNames = input.getRowType.getFieldNames.asScala.toArray
+    val inputFieldNames = inputRel.getRowType.getFieldNames.asScala.toArray
     val tableFieldNames = temporalTable.getRowType.getFieldNames
     val resultFieldNames = getRowType.getFieldNames.asScala.toArray
     val whereString = calcOnTemporalTable match {

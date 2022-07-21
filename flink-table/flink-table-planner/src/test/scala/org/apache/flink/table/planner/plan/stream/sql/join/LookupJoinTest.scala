@@ -23,7 +23,6 @@ import org.apache.flink.core.testutils.FlinkMatchers.containsMessage
 import org.apache.flink.streaming.api.datastream.DataStream
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment
 import org.apache.flink.table.api._
-import org.apache.flink.table.api.config.ExecutionConfigOptions
 import org.apache.flink.table.api.internal.TableEnvironmentInternal
 import org.apache.flink.table.data.RowData
 import org.apache.flink.table.descriptors.ConnectorDescriptorValidator.CONNECTOR_TYPE
@@ -641,30 +640,6 @@ class LookupJoinTest(legacyTableSource: Boolean) extends TableTestBase with Seri
   def testAppendSourceJoinTemporalTableJoinKeyNotContainsPk(): Unit = {
     val sql = "SELECT * FROM MyTable AS T JOIN dimWithPk " +
       "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.b = D.name AND D.age = 33"
-
-    util.verifyExecPlan(sql)
-  }
-
-  @Test
-  def testCdcSourceJoinNotContainsPkDisableUpsertMaterialize(): Unit = {
-    util.tableConfig.getConfiguration.set(
-      ExecutionConfigOptions.TABLE_EXEC_LOOKUP_JOIN_UPSERT_MATERIALIZE,
-      ExecutionConfigOptions.UpsertMaterialize.NONE)
-
-    val sql = "SELECT * FROM cdc AS T JOIN dimWithPk " +
-      "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.name = D.name AND D.age = 33"
-
-    util.verifyExecPlan(sql)
-  }
-
-  @Test
-  def testCdcSourceJoinContainsPkForceUpsertMaterialize(): Unit = {
-    util.tableConfig.getConfiguration.set(
-      ExecutionConfigOptions.TABLE_EXEC_LOOKUP_JOIN_UPSERT_MATERIALIZE,
-      ExecutionConfigOptions.UpsertMaterialize.FORCE)
-
-    val sql = "SELECT * FROM cdc AS T JOIN dimWithPk " +
-      "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.id = D.id AND D.age = 33"
 
     util.verifyExecPlan(sql)
   }

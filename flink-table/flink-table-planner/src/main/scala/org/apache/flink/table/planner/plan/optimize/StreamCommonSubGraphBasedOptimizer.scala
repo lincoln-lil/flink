@@ -26,10 +26,12 @@ import org.apache.flink.table.planner.delegation.StreamPlanner
 import org.apache.flink.table.planner.plan.`trait`.{MiniBatchInterval, MiniBatchIntervalTrait, MiniBatchIntervalTraitDef, MiniBatchMode, ModifyKindSet, ModifyKindSetTraitDef, UpdateKind, UpdateKindTraitDef}
 import org.apache.flink.table.planner.plan.metadata.FlinkRelMetadataQuery
 import org.apache.flink.table.planner.plan.nodes.calcite.{LegacySink, Sink}
+import org.apache.flink.table.planner.plan.nodes.physical.FlinkPhysicalRel
 import org.apache.flink.table.planner.plan.nodes.physical.stream.{StreamPhysicalDataStreamScan, StreamPhysicalIntermediateTableScan, StreamPhysicalLegacyTableSourceScan, StreamPhysicalRel, StreamPhysicalTableSourceScan}
 import org.apache.flink.table.planner.plan.optimize.program.{FlinkStreamProgram, StreamOptimizeContext}
 import org.apache.flink.table.planner.plan.schema.IntermediateRelTable
 import org.apache.flink.table.planner.plan.stats.FlinkStatistic
+import org.apache.flink.table.planner.plan.validate.StreamNonDeterministicPlanResolver
 import org.apache.flink.table.planner.utils.ShortcutUtils.unwrapContext
 import org.apache.flink.table.planner.utils.TableConfigUtils
 import org.apache.flink.util.Preconditions
@@ -317,4 +319,9 @@ class StreamCommonSubGraphBasedOptimizer(planner: StreamPlanner)
     }
   }
 
+  override protected def postOptimize(expanded: Seq[RelNode]): Seq[RelNode] = {
+    StreamNonDeterministicPlanResolver.resolvePhysicalPlan(
+      expanded.map(_.asInstanceOf[FlinkPhysicalRel]),
+      planner.getTableConfig)
+  }
 }

@@ -39,16 +39,16 @@ import scala.collection.JavaConverters._
 class StreamPhysicalLookupJoin(
     cluster: RelOptCluster,
     traitSet: RelTraitSet,
-    input: RelNode,
+    inputRel: RelNode,
     temporalTable: RelOptTable,
     tableCalcProgram: Option[RexProgram],
     joinInfo: JoinInfo,
     joinType: JoinRelType,
-    upsertMaterialize: Boolean = false)
+    val upsertMaterialize: Boolean = false)
   extends CommonPhysicalLookupJoin(
     cluster,
     traitSet,
-    input,
+    inputRel,
     temporalTable,
     tableCalcProgram,
     joinInfo,
@@ -73,7 +73,7 @@ class StreamPhysicalLookupJoin(
     new StreamPhysicalLookupJoin(
       cluster,
       traitSet,
-      input,
+      getInput,
       temporalTable,
       tableCalcProgram,
       joinInfo,

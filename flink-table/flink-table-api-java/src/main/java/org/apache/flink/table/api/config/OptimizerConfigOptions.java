@@ -142,4 +142,28 @@ public class OptimizerConfigOptions {
                     .withDescription(
                             "When it is true, the optimizer will merge the operators with pipelined shuffling "
                                     + "into a multiple input operator to reduce shuffling and improve performance. Default value is true.");
+
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<NonDeterministicUpdateHandling>
+            TABLE_OPTIMIZER_NONDETERMINISTIC_UPDATE_HANDLING =
+                    key("table.optimizer.non-deterministic-update.handling")
+                            .enumType(NonDeterministicUpdateHandling.class)
+                            .defaultValue(NonDeterministicUpdateHandling.IGNORE)
+                            .withDescription("");
+
+    /** Strategy for handling non-deterministic updates. */
+    @PublicEvolving
+    public enum NonDeterministicUpdateHandling {
+
+        /**
+         * Try to resolve by planner automatically if exists non-deterministic updates, will raise
+         * an error when cannot resolve.
+         */
+        TRY_RESOLVE,
+
+        /**
+         * Do nothing if exists non-deterministic updates, the risk of wrong result still exists.
+         */
+        IGNORE
+    }
 }

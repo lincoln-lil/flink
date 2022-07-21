@@ -593,16 +593,8 @@ class FlinkChangelogModeInferenceProgram extends FlinkOptimizeProgram[StreamOpti
             }
           }
 
-        case lookupJoin: StreamPhysicalLookupJoin =>
-          visitChildren(lookupJoin, requiredTrait) match {
-            case None => None
-            case Some(children) =>
-              val upsertMaterialize = analyzeUpsertMaterializeStrategy(lookupJoin)
-              val childTrait = children.head.getTraitSet.getTrait(UpdateKindTraitDef.INSTANCE)
-              createNewNode(lookupJoin.copy(upsertMaterialize), Some(children), childTrait)
-          }
-
-        case _: StreamPhysicalCorrelateBase | _: StreamPhysicalExchange | _: StreamPhysicalExpand |
+        case _: StreamPhysicalCorrelateBase | _: StreamPhysicalLookupJoin |
+            _: StreamPhysicalExchange | _: StreamPhysicalExpand |
             _: StreamPhysicalMiniBatchAssigner | _: StreamPhysicalWatermarkAssigner |
             _: StreamPhysicalWindowTableFunction =>
           // transparent forward requiredTrait to children
@@ -770,6 +762,7 @@ class FlinkChangelogModeInferenceProgram extends FlinkOptimizeProgram[StreamOpti
 
     /**
      * Try all possible rank strategies and return the first viable new node.
+     *
      * @param rankStrategies
      *   all possible supported rank strategy by current node
      * @param requiredUpdateKindTrait
@@ -891,29 +884,6 @@ class FlinkChangelogModeInferenceProgram extends FlinkOptimizeProgram[StreamOpti
               false
             }
         }
-      upsertMaterialize
-    }
-
-    /**
-     * Analyze whether to enable upsertMaterialize for lookup join or not. In these case will return
-     * true: <p> 1. when `TABLE_EXEC_LOOKUP_JOIN_UPSERT_MATERIALIZE` set to FORCE and lookup join's
-     * input is not insert only. <p> 2. when `TABLE_EXEC_LOOKUP_JOIN_UPSERT_MATERIALIZE` set to
-     * AUTO, lookup join's input is not insert only and lookup key doesn't contain primary key of
-     * the lookup source.
-     */
-    private def analyzeUpsertMaterializeStrategy(lookupJoin: StreamPhysicalLookupJoin): Boolean = {
-      val tableConfig = unwrapTableConfig(lookupJoin)
-      val inputChangelogMode =
-        ChangelogPlanUtils.getChangelogMode(lookupJoin.getInput.asInstanceOf[StreamPhysicalRel]).get
-      val hasUpdates = !inputChangelogMode.containsOnly(RowKind.INSERT)
-      val upsertMaterialize = {
-        tableConfig.get(ExecutionConfigOptions.TABLE_EXEC_LOOKUP_JOIN_UPSERT_MATERIALIZE) match {
-          case UpsertMaterialize.FORCE => hasUpdates
-          case UpsertMaterialize.NONE => false
-          case UpsertMaterialize.AUTO =>
-            hasUpdates && !lookupJoin.lookupKeyContainsPrimaryKey()
-        }
-      }
       upsertMaterialize
     }
   }
