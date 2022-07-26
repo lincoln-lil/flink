@@ -3632,7 +3632,7 @@ public abstract class RelOptUtil {
      */
     private static class RelHintPropagateShuttle extends RelHomogeneousShuttle {
         /** Stack recording the hints and its current inheritPath. */
-        private final Deque<Pair<List<RelHint>, Deque<Integer>>> inheritPaths = new ArrayDeque<>();
+        private Deque<Pair<List<RelHint>, Deque<Integer>>> inheritPaths = new ArrayDeque<>();
 
         /**
          * The hint strategies to decide if a hint should be attached to a relational expression.
@@ -3667,6 +3667,8 @@ public abstract class RelOptUtil {
             }
         }
 
+        // ----- FLINK MODIFICATION BEGIN -----
+
         /**
          * Handle the {@link Hintable}s.
          *
@@ -3696,12 +3698,37 @@ public abstract class RelOptUtil {
             if (hasQueryHints) {
                 inheritPaths.push(Pair.of(topHints, new ArrayDeque<>()));
             }
+
+            // ensure the join hints outside will not be propagated into the sub query
+            Deque<Pair<List<RelHint>, Deque<Integer>>> originInheritPaths = inheritPaths;
+            if (node instanceof SubQueryAlias) {
+                inheritPaths = clearJoinHintsInCurrentQueryLevel(inheritPaths);
+            }
+
             final RelNode node1 = visitChildren(node);
+            if (node instanceof SubQueryAlias) {
+                inheritPaths = originInheritPaths;
+            }
             if (hasQueryHints) {
                 inheritPaths.pop();
             }
             return attachHints(node1);
         }
+
+        private Deque<Pair<List<RelHint>, Deque<Integer>>> clearJoinHintsInCurrentQueryLevel(
+                Deque<Pair<List<RelHint>, Deque<Integer>>> inheritPaths) {
+            Deque<Pair<List<RelHint>, Deque<Integer>>> result = new ArrayDeque<>();
+            for (Pair<List<RelHint>, Deque<Integer>> pair : inheritPaths) {
+                List<RelHint> hintsWithoutJoinHints =
+                        FlinkHints.getHintsWithoutJoinHints(pair.left);
+                if (hintsWithoutJoinHints.size() != 0) {
+                    result.addLast(Pair.of(hintsWithoutJoinHints, pair.right));
+                }
+            }
+            return result;
+        }
+
+        // ----- FLINK MODIFICATION END -----
 
         private RelNode attachHints(RelNode original) {
             assert original instanceof Hintable;
