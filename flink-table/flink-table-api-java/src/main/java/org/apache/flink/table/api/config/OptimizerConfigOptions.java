@@ -149,7 +149,12 @@ public class OptimizerConfigOptions {
                     key("table.optimizer.non-deterministic-update.handling")
                             .enumType(NonDeterministicUpdateHandling.class)
                             .defaultValue(NonDeterministicUpdateHandling.IGNORE)
-                            .withDescription("");
+                            .withDescription(
+                                    "When it is `TRY_RESOLVE`, the optimizer will validate if there's any non-deterministic updates which "
+                                            + "may cause wrong result or error, and also try to eliminate the non determinism generated "
+                                            + "from lookup join node by adding materialization to a new physical lookup join operator, "
+                                            + "will raise an error if there still exists other non-determinism besides lookup join. "
+                                            + "Default value is `IGNORE`, the optimizer does no changes.");
 
     /** Strategy for handling non-deterministic updates. */
     @PublicEvolving

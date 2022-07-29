@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.flink.table.planner.plan.validate
 
 import org.apache.flink.table.api.{TableConfig, TableException}
@@ -46,16 +45,39 @@ import scala.collection.JavaConversions._
 import scala.collection.mutable
 
 /**
- * Try to resolve the plan correctness issue caused by 'Non-Deterministic Update' (NDU). The NDU
- * pattern mainly includes: <p> 1. Non-deterministic updates <p> 2. CDC source with metadata: <p>
- * 2.1 Upsert key lost in pipeline which source has pk <p> 2.2 No upsert key in pipeline which
- * source has no pk (cdc source without pk, but with metadata) TODO consider CDC source with
- * metadata is another form of non-deterministic update, this can be an unification
+ * The {@link StreamNonDeterministicPlanResolver} tries to resolve the correctness issue caused by
+ * 'Non-Deterministic Updates' (NDU) in a changelog pipeline. Changelog may contains kinds of
+ * messages: Insert (I), Delete (D), Update_before (UB), Update_after (UA).
  *
- * Why not do this validation in physical rewrite phase? like FlinkChangelogModeInferenceProgram
- * does.
+ * There's no NDU problem in an insert only pipeline.
+ *
+ * For the updates, there are two cases, with and without upsertKey(a metadata from {@link
+ * FlinkRelMdUpsertKeys}, consider it as the primary key of the changelog). The upsertKey can be
+ * always treated as deterministic, so if all of the pipeline operators can transmit upsertKey
+ * normally (include working with sink's primary key), everything goes well.
+ *
+ * The key problem is upsertKey can be easily lost in a pipeline or does not exist from the source
+ * or at the sink. All stateful operators can only process an update (D/UB/UA) message by comparing
+ * the complete row (retract by row) if without a key identifier, also include a sink without
+ * primary key that works as retractSink. So under the retract by row mode, an stateful operator
+ * requires no non-deterministic column disturb the original changelog row. There're three killers:
+ *
+ * <p> 1. Non-deterministic functions(include scalar, table, aggregate functions, builtin or custom
+ * ones) <p> 2. LookupJoin on an evolving source <p> 3. Cdc-source carries metadata field(system
+ * columns, not belongs to the entity data itself)
+ *
+ * For the first step, this resolver automatically enables the materialization for No.2(LookupJoin)
+ * if needed, and gives the detailed error message for No.1 (Non-deterministic functions) and
+ * No.3(Cdc-source with metadata) which we think it is relatively easy to change the SQL(add
+ * materialization is not a good idea for now, it has very high cost and will bring too much
+ * complexity to the operators)
+ *
+ * Why not do this validation and rewrite in physical-rewrite phase? like {@link
+ * FlinkChangelogModeInferenceProgram} does.
  *   - because the physical plan may be changed a lot after physical rewrite being done, we should
  *     check the 'final' plan.
+ *
+ * Some specific plan patterns:
  *
  * <p> 1. Non-deterministic scalar function calls
  * {{{
@@ -90,7 +112,8 @@ import scala.collection.mutable
  *  Scan1
  * }}}
  *
- * <p> 3.1 lookup join: a projection
+ * <p> 3.1 lookup join: a inner project with non-deterministic function calls or remaining join
+ * condition is non-deterministic
  * {{{
  *       Sink
  *        |
@@ -119,7 +142,7 @@ import scala.collection.mutable
  * {{{
  *      Sink
  *        | no upsertKey can be inferred
- *    LookupJoin
+ *    LookupJoin {lookup key not contains the dim's pk}
  *      /      \
  *    /       Source2
  *  Project1 {select id,name,attr1,op_time}
@@ -144,14 +167,12 @@ import scala.collection.mutable
  */
 object StreamNonDeterministicPlanResolver {
 
-  val NON_DETERMINISTIC_CONDITION_ERROR_MSG_TEMPLATE =
-    "There exists non deterministic function: '%s' in condition: '%s' which may cause wrong result in update pipeline."
-
   val NO_REQUIRED_DETERMINISM = ImmutableBitSet.of();
 
   /**
-   * Resolve ... by configured {@link *
-   * OptimizerConfigOptions.TABLE_OPTIMIZER_NONDETERMINISTIC_UPDATE_HANDLING}.
+   * Try to resolve the NDU problem if configured {@link
+   * OptimizerConfigOptions.TABLE_OPTIMIZER_NONDETERMINISTIC_UPDATE_HANDLING}. is in `TRY_RESOLVE`
+   * mode. Will raise an error if the NDU problems in the given plan can not be completely solved.
    */
   def resolvePhysicalPlan(
       physicalRelNodes: Seq[FlinkPhysicalRel],
@@ -189,68 +210,62 @@ object StreamNonDeterministicPlanResolver {
   }
 
   /**
-   * What is the 'update determinism' in streaming? For a changelog streaming, the UB/D messages
-   * should be correctly mapping to the corresponding UA/I messages whether there's a primary key or
-   * not, otherwise it may produce wrong result. So the correctly mapping of processing updating
-   * messages called 'update determinism'. <br><br>
+   * An inner visitor to validate if there's any NDU problems which may cause wrong result and try
+   * to rewrite lookup join node with materialization (to eliminate the non determinism generated by
+   * lookup join node only).
    *
-   * The transmission rule of required update determinism: <p>
+   * The visitor will try to satisfy the required determinism(represent by ImmutableBitSet) from
+   * root. The transmission rule of required determinism:
    *
-   * 0. all required update determinism is under the precondition: input has updates, that is say no
-   * update determinism will be passed to an insert only stream <p>
+   * <p> 0. all required determinism is under the precondition: input has updates, that is say no
+   * update determinism will be passed to an insert only stream
    *
-   *   1. the initial required determinism to the root node(e.g., sink node) was none
+   * <p> 1. the initial required determinism to the root node(e.g., sink node) was none
    *
-   * 2. for a relNode, it will process on two aspects:
+   * <p> 2. for a relNode, it will process on two aspects:
    *   - can satisfy non-empty required determinism
-   *   - actively requires input determinism by self requirements(e.g., stateful node with update
-   *     inputs)
-   *
-   * 3. for a sink node, it will require key columns' determinism when primary key is defined or
-   * require all columns' determinism when no primary key is defined
-   *
-   * 4. for a cdc source node(which will generate updates), the metadata columns ore
-   * non-deterministic.
-   *
-   * 5. TODO draw a table: for stateful nodes, the 'update determinism'
-   *   - groupAgg requires determinism on grouping keys
-   *   - overAgg requires determinism on partition keys and order keys
-   *   - windowAgg requires determinism on
-   *   - rank requires determinism on
-   *   - deduplicate requires determinism on
-   *   - join requires determinism on
+   *   - actively requires determinism from input by self requirements(e.g., stateful node works on
+   *     retract by row mode)
    *
    * <p>
    * {{{
+   *  Rel3
    *   | require input
    *   v
-   *  Rel2
+   *  Rel2 {1. satisfy Rel3's requirement 2. append new requirement to input Rel1}
    *   | require input
    *   v
    *  Rel1
    * }}}
    *
-   * and the requiredDeterminism passed to input will exclude columns which were upsertKey
-   *
-   * e.g.,
+   * the requiredDeterminism passed to input will exclude columns which were in upsertKey e.g.,
    * {{{
-   *  Sink {pk=(c3,day)}
-   *   | require upsertKey=(c3,day)
-   *  GroupAgg{group by c3, day}
-   *   |
-   * Project{select c1,c2,DATE_FORMAT(CURRENT_TIMESTAMP, 'yyMMdd') day,...}
+   *  Sink {pk=(c3)} requiredDeterminism=(c3)
+   *   | passed requiredDeterminism={}
+   *  GroupAgg{group by c3, day} append requiredDeterminism=(c3, day)
+   *   | passed requiredDeterminism=(c3, day)
+   * Project{select c1,c2,DATE_FORMAT(CURRENT_TIMESTAMP, 'yyMMdd') day,...} [x] can not satisfy
    *   |
    * Deduplicate{keep last row, dedup on c1,c2}
    *   |
    *  Scan
    * }}}
+   *
+   * <p> 3. for a sink node, it will require key columns' determinism when primary key is defined or
+   * require all columns' determinism when no primary key is defined
+   *
+   * <p> 4. for a cdc source node(which will generate updates), the metadata columns are treated as
+   * non-deterministic.
    */
   private class NonDeterministicUpdatePlanVisitor {
 
+    val NON_DETERMINISTIC_CONDITION_ERROR_MSG_TEMPLATE =
+      "There exists non deterministic function: '%s' in condition: '%s' which may cause wrong result in update pipeline."
+
     /**
-     * Visit the given rel node to check if it satisfies the requirement of the upsert key and the
-     * determinism of the specified column. Note all operators which append new columns to output
-     * should exclude them from input requireDeterminism
+     * Visit the given rel node to check if it satisfies the required determinism of the specified
+     * columns. Note all operators which append new columns to output should exclude them from input
+     * requireDeterminism.
      *
      * @param rel
      *   relNode to be validated
@@ -285,8 +300,7 @@ object StreamNonDeterministicPlanResolver {
             val requireInputDeterminism = if (sink.upsertMaterialize || primaryKey.isEmpty) {
               // SinkUpsertMaterializer only support no upsertKey mode, it says all input columns
               // should be deterministic (same as no primary key defined on sink)
-              // TODO this should be optimized after SinkUpsertMaterializer support upsertKey
-              // optimization by FLINK-28569.
+              // TODO should optimize it after SinkUpsertMaterializer support upsertKey FLINK-28569.
               ImmutableBitSet.range(sink.getInput.getRowType.getFieldCount)
             } else {
               ImmutableBitSet.of(primaryKey: _*)
@@ -582,7 +596,7 @@ object StreamNonDeterministicPlanResolver {
 
           /**
            * we do not distinguish the time attribute condition in interval/temporal join from
-           * regular/window join here becase: rowtime field always from source, proctime is not
+           * regular/window join here because: rowtime field always from source, proctime is not
            * limited (from source), when proctime appended to an update row without upsertKey then
            * result may goes wrong, in such a case proctime( was materialized as
            * PROCTIME_MATERIALIZE(PROCTIME())) is equal to a normal dynamic temporal function and
@@ -630,8 +644,9 @@ object StreamNonDeterministicPlanResolver {
             .asInstanceOf[StreamPhysicalRel]
 
         case _: StreamPhysicalMatch =>
-          // TODO support check determinism for MatchRecognize in FLINK-xxx
-          throw new TableException("Unsupported to resolve match-recognize operator.")
+          // TODO to be supported in FLINK-28743
+          throw new TableException(
+            "Unsupported to resolve non-deterministic issue in match-recognize.")
 
         case _: StreamPhysicalChangelogNormalize | _: StreamPhysicalDropUpdateBefore |
             _: StreamPhysicalMiniBatchAssigner | _: StreamPhysicalUnion | _: StreamPhysicalSort |
@@ -785,8 +800,8 @@ object StreamNonDeterministicPlanResolver {
 
         case _ =>
           throw new UnsupportedOperationException(
-            s"Unsupported visit for node ${rel.getClass.getSimpleName}, please add the visit "
-              + s"implementation if it is a newly added physical node")
+            s"Unsupported to visit node ${rel.getClass.getSimpleName}, please add the visit "
+              + s"implementation if it is a newly added stream physical node.")
       }
 
     private def transmitDeterminismRequirement(
@@ -907,11 +922,13 @@ object StreamNonDeterministicPlanResolver {
             }
         }
       errorMsg.append(
-        "can not satisfy the determinism requirement for correctly processing update message(changelogMode contains ), usually these"
-          + " columns been used as group by keys or added to a row without upsertKey . Please "
-          + "consider removing these non-deterministic columns or making them deterministic.\n")
+        "can not satisfy the determinism requirement for correctly processing update message("
+          + "'UB'/'UA'/'D' in changelogMode, not 'I' only), this usually happens when input node has"
+          + " no upsertKey(upsertKeys=[{}]) or current node outputs non-deterministic update "
+          + "messages. Please consider removing these non-deterministic columns or making them "
+          + "deterministic by using deterministic functions.\n")
       errorMsg
-        .append("related rel plan:\n")
+        .append("\nrelated rel plan:\n")
         .append(
           FlinkRelOptUtil.toString(relatedRel, withChangelogTraits = true, withUpsertKey = true))
 
