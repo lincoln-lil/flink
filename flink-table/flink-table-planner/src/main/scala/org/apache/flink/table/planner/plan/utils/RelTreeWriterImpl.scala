@@ -17,6 +17,7 @@
  */
 package org.apache.flink.table.planner.plan.utils
 
+import org.apache.flink.table.planner.plan.metadata.FlinkRelMetadataQuery
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalRel
 
 import org.apache.calcite.rel.RelNode
@@ -36,7 +37,8 @@ class RelTreeWriterImpl(
     withIdPrefix: Boolean = false,
     withChangelogTraits: Boolean = false,
     withRowType: Boolean = false,
-    withTreeStyle: Boolean = true)
+    withTreeStyle: Boolean = true,
+    withUpsertKey: Boolean = false)
   extends RelWriterImpl(pw, explainLevel, withIdPrefix) {
 
   var lastChildren: Seq[Boolean] = Nil
@@ -82,6 +84,19 @@ class RelTreeWriterImpl(
         val changelogMode = ChangelogPlanUtils.getChangelogMode(streamRel)
         printValues.add(
           Pair.of("changelogMode", ChangelogPlanUtils.stringifyChangelogMode(changelogMode)))
+      case _ => // ignore
+    }
+
+    if (withUpsertKey) rel match {
+      case streamRel: StreamPhysicalRel =>
+        val fmq = FlinkRelMetadataQuery.reuseOrCreate(rel.getCluster.getMetadataQuery)
+        val upsertKeys = fmq.getUpsertKeys(streamRel)
+        if (null != upsertKeys && !upsertKeys.isEmpty) {
+          printValues.add(
+            Pair.of("upsertKeys", upsertKeys.map(bitset => bitset.toString).mkString(", ")))
+        } else {
+          printValues.add(Pair.of("upsertKeys", ""))
+        }
       case _ => // ignore
     }
 
