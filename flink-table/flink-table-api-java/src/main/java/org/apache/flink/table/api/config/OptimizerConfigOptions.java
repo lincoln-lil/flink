@@ -142,4 +142,33 @@ public class OptimizerConfigOptions {
                     .withDescription(
                             "When it is true, the optimizer will merge the operators with pipelined shuffling "
                                     + "into a multiple input operator to reduce shuffling and improve performance. Default value is true.");
+
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<NonDeterministicUpdateHandling>
+            TABLE_OPTIMIZER_NONDETERMINISTIC_UPDATE_HANDLING =
+                    key("table.optimizer.non-deterministic-update.handling")
+                            .enumType(NonDeterministicUpdateHandling.class)
+                            .defaultValue(NonDeterministicUpdateHandling.IGNORE)
+                            .withDescription(
+                                    "When it is `TRY_RESOLVE`, the optimizer will validate if there's any non-deterministic updates which "
+                                            + "may cause wrong result or error, and also try to eliminate the non determinism generated "
+                                            + "from lookup join node by adding materialization to a new physical lookup join operator, "
+                                            + "will raise an error if there still exists other non-determinism besides lookup join. "
+                                            + "Default value is `IGNORE`, the optimizer does no changes.");
+
+    /** Strategy for handling non-deterministic updates. */
+    @PublicEvolving
+    public enum NonDeterministicUpdateHandling {
+
+        /**
+         * Try to resolve by planner automatically if exists non-deterministic updates, will raise
+         * an error when cannot resolve.
+         */
+        TRY_RESOLVE,
+
+        /**
+         * Do nothing if exists non-deterministic updates, the risk of wrong result still exists.
+         */
+        IGNORE
+    }
 }

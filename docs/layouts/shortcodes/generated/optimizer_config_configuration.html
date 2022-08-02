@@ -48,6 +48,12 @@ ONE_PHASE: Enforce to use one stage aggregate which only has CompleteGlobalAggre
             <td>When it is true, the optimizer will merge the operators with pipelined shuffling into a multiple input operator to reduce shuffling and improve performance. Default value is true.</td>
         </tr>
         <tr>
+            <td><h5>table.optimizer.non-deterministic-update.handling</h5><br> <span class="label label-primary">Streaming</span></td>
+            <td style="word-wrap: break-word;">IGNORE</td>
+            <td><p>Enum</p></td>
+            <td>When it is `TRY_RESOLVE`, the optimizer will validate if there's any non-deterministic updates which may cause wrong result or error, and also try to eliminate the non determinism generated from lookup join node by adding materialization to a new physical lookup join operator, will raise an error if there still exists other non-determinism besides lookup join. Default value is `IGNORE`, the optimizer does no changes.<br /><br />Possible values:<ul><li>"TRY_RESOLVE"</li><li>"IGNORE"</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>table.optimizer.reuse-source-enabled</h5><br> <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
