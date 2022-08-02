@@ -60,7 +60,7 @@ import org.apache.flink.table.planner.plan.schema.TableSourceTable;
 import org.apache.flink.table.planner.plan.utils.LookupJoinUtil;
 import org.apache.flink.table.planner.utils.JavaScalaConversionUtil;
 import org.apache.flink.table.planner.utils.ShortcutUtils;
-import org.apache.flink.table.runtime.collector.ListenableCollector;
+import org.apache.flink.table.runtime.collector.TableFunctionCollector;
 import org.apache.flink.table.runtime.collector.TableFunctionResultFuture;
 import org.apache.flink.table.runtime.generated.GeneratedCollector;
 import org.apache.flink.table.runtime.generated.GeneratedFunction;
@@ -541,7 +541,7 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
                 projectionOnTemporalTable != null
                         ? (RowType) toLogicalType(temporalTableOutputType.get())
                         : tableSourceRowType;
-        GeneratedCollector<ListenableCollector<RowData>> generatedCollector =
+        GeneratedCollector<TableFunctionCollector<RowData>> generatedCollector =
                 LookupJoinCodeGenerator.generateCollector(
                         new CodeGeneratorContext(config, classLoader),
                         inputRowType,
