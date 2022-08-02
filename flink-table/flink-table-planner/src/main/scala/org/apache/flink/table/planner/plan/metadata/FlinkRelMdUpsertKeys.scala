@@ -24,6 +24,7 @@ import org.apache.flink.table.planner.plan.nodes.physical.batch.{BatchPhysicalGr
 import org.apache.flink.table.planner.plan.nodes.physical.common.CommonPhysicalLookupJoin
 import org.apache.flink.table.planner.plan.nodes.physical.stream.{StreamPhysicalChangelogNormalize, StreamPhysicalDeduplicate, StreamPhysicalDropUpdateBefore, StreamPhysicalGlobalGroupAggregate, StreamPhysicalGroupAggregate, StreamPhysicalGroupWindowAggregate, StreamPhysicalIntervalJoin, StreamPhysicalLocalGroupAggregate, StreamPhysicalOverAggregate}
 import org.apache.flink.table.planner.plan.schema.IntermediateRelTable
+import org.apache.flink.table.planner.plan.utils.FlinkRexUtil
 
 import com.google.common.collect.ImmutableSet
 import org.apache.calcite.plan.hep.HepRelVertex
@@ -228,17 +229,29 @@ class FlinkRelMdUpsertKeys private extends MetadataHandler[UpsertKeys] {
       join: CommonPhysicalLookupJoin,
       mq: RelMetadataQuery): util.Set[ImmutableBitSet] = {
     val left = join.getInput
-    val leftKeys = FlinkRelMetadataQuery.reuseOrCreate(mq).getUpsertKeys(left)
     val leftType = left.getRowType
     val leftJoinKeys = join.joinInfo.leftSet
+    // differs from regular join, here we do not filterKeys because there's no shuffle on join keys
+    // by default.
+    val leftUpsertKeys = FlinkRelMetadataQuery.reuseOrCreate(mq).getUpsertKeys(left)
+    val rightUniqueKeys = FlinkRelMdUniqueKeys.INSTANCE.getUniqueKeysOfTemporalTable(join)
+
+    val rightUpsertKeys =
+      if (
+        (join.remainingCondition.isDefined && !FlinkRexUtil.isDeterministicInStreaming(
+          join.remainingCondition.get))
+        || (join.calcOnTemporalTable.isDefined && !FlinkRexUtil.isDeterministicInStreaming(
+          join.calcOnTemporalTable.get))
+      ) { null }
+      else { rightUniqueKeys }
+
     FlinkRelMdUniqueKeys.INSTANCE.getJoinUniqueKeys(
       join.joinType,
       leftType,
-      filterKeys(leftKeys, leftJoinKeys),
-      null,
-      areColumnsUpsertKeys(leftKeys, leftJoinKeys),
-      // TODO get uniqueKeys from TableSchema of TableSource
-      null
+      leftUpsertKeys,
+      rightUpsertKeys,
+      areColumnsUpsertKeys(leftUpsertKeys, leftJoinKeys),
+      rightUpsertKeys != null
     )
   }
 
