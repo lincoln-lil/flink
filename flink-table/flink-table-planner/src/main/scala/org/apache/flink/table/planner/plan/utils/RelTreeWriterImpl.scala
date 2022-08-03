@@ -92,8 +92,13 @@ class RelTreeWriterImpl(
         val fmq = FlinkRelMetadataQuery.reuseOrCreate(rel.getCluster.getMetadataQuery)
         val upsertKeys = fmq.getUpsertKeys(streamRel)
         if (null != upsertKeys && !upsertKeys.isEmpty) {
+          val fieldNames = streamRel.getRowType.getFieldNames
           printValues.add(
-            Pair.of("upsertKeys", upsertKeys.map(bitset => bitset.toString).mkString(", ")))
+            Pair.of(
+              "upsertKeys",
+              upsertKeys
+                .map(bitset => s"[${bitset.toArray.map(fieldNames).mkString(", ")}]")
+                .mkString(", ")))
         } else {
           printValues.add(Pair.of("upsertKeys", ""))
         }
