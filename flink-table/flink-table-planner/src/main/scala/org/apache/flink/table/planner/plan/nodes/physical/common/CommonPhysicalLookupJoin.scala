@@ -291,33 +291,33 @@ abstract class CommonPhysicalLookupJoin(
   /** Get final output pk indexes if exists, otherwise will get empty. */
   def getOutputPrimaryKeyIndexes: Array[Int] = {
     val temporalPkIdxs = getPrimaryKeyIndexesOfTemporalTable
-
-    val outputPkIdx = if (!temporalPkIdxs.isEmpty) {
-      if (calcOnTemporalTable.isDefined) {
-        val program = calcOnTemporalTable.get
-        val outputMapping = program.getProjectList.asScala.zipWithIndex
-          .map { case (ref, index) => (index, program.expandLocalRef(ref)) }
-          .map {
-            case (outIndex, ref) =>
-              ref match {
-                case inputRef: RexInputRef => (inputRef.getIndex, outIndex)
-                case _ => (-1, -1)
-              }
-          }
-          .toMap
-        val outputPk = temporalPkIdxs.forall(outputMapping.contains)
-        if (outputPk) {
-          // remapping pk index
-          temporalPkIdxs.map(outputMapping.get(_).get)
-        } else {
-          Array[Int]()
-        }
-      } else {
-        temporalPkIdxs
-      }
+    val NO_PK = Array[Int]()
+    val outputPkIdx = if (temporalPkIdxs.isEmpty) {
+      NO_PK
     } else {
-      // temporal table has no pk, no uk produces
-      Array[Int]()
+      calcOnTemporalTable match {
+        case Some(_) =>
+          val program = calcOnTemporalTable.get
+          val outputMapping = program.getProjectList.asScala.zipWithIndex
+            .map { case (ref, index) => (index, program.expandLocalRef(ref)) }
+            .map {
+              case (outIndex, ref) =>
+                ref match {
+                  case inputRef: RexInputRef => (inputRef.getIndex, outIndex)
+                  case _ => (-1, -1)
+                }
+            }
+            .toMap
+          val outputPk = temporalPkIdxs.forall(outputMapping.contains)
+          if (outputPk) {
+            // remapping pk index
+            temporalPkIdxs.map(outputMapping)
+          } else {
+            NO_PK
+          }
+
+        case None => temporalPkIdxs
+      }
     }
 
     outputPkIdx

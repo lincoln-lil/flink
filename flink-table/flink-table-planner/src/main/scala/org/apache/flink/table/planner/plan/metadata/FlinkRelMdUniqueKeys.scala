@@ -507,7 +507,7 @@ class FlinkRelMdUniqueKeys private extends MetadataHandler[BuiltInMetadata.Uniqu
   private[flink] def getUniqueKeysOfTemporalTable(
       join: CommonPhysicalLookupJoin): JSet[ImmutableBitSet] = {
     val outputPkIdx = join.getOutputPrimaryKeyIndexes
-    if (!outputPkIdx.isEmpty) {
+    if (outputPkIdx.nonEmpty) {
       // compare with join key pairs
       val lookupKeys = join.joinInfo.pairs().map(_.target).toSet
       if (outputPkIdx.forall(lookupKeys.contains)) {
