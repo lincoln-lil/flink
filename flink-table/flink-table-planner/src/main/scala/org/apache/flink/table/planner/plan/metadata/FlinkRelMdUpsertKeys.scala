@@ -236,13 +236,13 @@ class FlinkRelMdUpsertKeys private extends MetadataHandler[UpsertKeys] {
     val leftUpsertKeys = FlinkRelMetadataQuery.reuseOrCreate(mq).getUpsertKeys(left)
     val rightUniqueKeys = FlinkRelMdUniqueKeys.INSTANCE.getUniqueKeysOfTemporalTable(join)
 
+    val remainingConditionNonDeterministic =
+      join.remainingCondition.exists(c => !FlinkRexUtil.isDeterministicInStreaming(c))
+    lazy val calcOnTemporalTableNonDeterministic =
+      join.calcOnTemporalTable.exists(p => !FlinkRexUtil.isDeterministicInStreaming(p))
+
     val rightUpsertKeys =
-      if (
-        (join.remainingCondition.isDefined && !FlinkRexUtil.isDeterministicInStreaming(
-          join.remainingCondition.get))
-        || (join.calcOnTemporalTable.isDefined && !FlinkRexUtil.isDeterministicInStreaming(
-          join.calcOnTemporalTable.get))
-      ) { null }
+      if (remainingConditionNonDeterministic || calcOnTemporalTableNonDeterministic) { null }
       else { rightUniqueKeys }
 
     FlinkRelMdUniqueKeys.INSTANCE.getJoinUniqueKeys(
