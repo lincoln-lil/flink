@@ -594,8 +594,9 @@ object FlinkRexUtil {
     val visitor = new RexVisitorImpl[Void](true) {
       override def visitCall(call: RexCall): Void = {
         // dynamic function call is also non-deterministic to streaming
-        if (!call.getOperator.isDeterministic || call.getOperator.isDynamicFunction)
+        if (!call.getOperator.isDeterministic || call.getOperator.isDynamicFunction) {
           throw Util.FoundOne.NULL
+        }
         super.visitCall(call)
       }
     }
@@ -621,13 +622,7 @@ object FlinkRexUtil {
       }
     }
     val projects = rexProgram.getProjectList.map(rexProgram.expandLocalRef)
-    projects.forall {
-      expr =>
-        expr match {
-          case rexNode: RexNode => isDeterministicInStreaming(rexNode)
-          case _ => true // ignore
-        }
-    }
+    projects.forall(isDeterministicInStreaming)
   }
 }
 
