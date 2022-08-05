@@ -62,6 +62,7 @@ public class BatchExecLookupJoin extends CommonExecLookupJoin implements BatchEx
                 true,
                 Collections.singletonList(inputProperty),
                 outputType,
+                null,
                 description);
     }
 }

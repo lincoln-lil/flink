@@ -18,7 +18,10 @@
 
 package org.apache.flink.table.planner.hint;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.planner.plan.rules.logical.WrapJsonAggFunctionArgumentsRule;
+
+import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableSet;
 
 import org.apache.calcite.rel.hint.HintOptionChecker;
 import org.apache.calcite.rel.hint.HintPredicate;
@@ -28,6 +31,15 @@ import org.apache.calcite.rel.hint.HintStrategyTable;
 import org.apache.calcite.util.Litmus;
 
 import java.util.Collections;
+
+import static org.apache.flink.table.planner.hint.LookupJoinHintOptions.ASYNC_CAPACITY;
+import static org.apache.flink.table.planner.hint.LookupJoinHintOptions.ASYNC_LOOKUP;
+import static org.apache.flink.table.planner.hint.LookupJoinHintOptions.ASYNC_OUTPUT_MODE;
+import static org.apache.flink.table.planner.hint.LookupJoinHintOptions.ASYNC_TIMEOUT;
+import static org.apache.flink.table.planner.hint.LookupJoinHintOptions.FIXED_DELAY;
+import static org.apache.flink.table.planner.hint.LookupJoinHintOptions.MAX_ATTEMPTS;
+import static org.apache.flink.table.planner.hint.LookupJoinHintOptions.RETRY_PREDICATE;
+import static org.apache.flink.table.planner.hint.LookupJoinHintOptions.RETRY_STRATEGY;
 
 /** A collection of Flink style {@link HintStrategy}s. */
 public abstract class FlinkHintStrategies {
@@ -82,6 +94,11 @@ public abstract class FlinkHintStrategies {
                         HintStrategy.builder(HintPredicates.JOIN)
                                 .optionChecker(NON_EMPTY_LIST_OPTION_CHECKER)
                                 .build())
+                .hintStrategy(
+                        JoinStrategy.LOOKUP.getJoinHintName(),
+                        HintStrategy.builder(HintPredicates.JOIN)
+                                .optionChecker(LOOKUP_NON_EMPTY_KV_OPTION_CHECKER)
+                                .build())
                 .build();
     }
 
@@ -107,6 +124,41 @@ public abstract class FlinkHintStrategies {
                                     + "one table or view specified in hint {}.",
                             FlinkHints.stringifyHints(Collections.singletonList(hint)),
                             hint.hintName);
+
+    private static final HintOptionChecker LOOKUP_NON_EMPTY_KV_OPTION_CHECKER =
+            (lookupHint, litmus) -> {
+                litmus.check(
+                        lookupHint.listOptions.size() == 0,
+                        "Invalid list options in LOOKUP hint, only support key-value options.");
+
+                Configuration conf = Configuration.fromMap(lookupHint.kvOptions);
+                ImmutableSet<String> requiredKeys = LookupJoinHintOptions.getRequiredOptions();
+                litmus.check(
+                        requiredKeys.stream().allMatch(conf::containsKey),
+                        "Invalid LOOKUP hint: incomplete required option(s): {}",
+                        requiredKeys);
+
+                ImmutableSet<String> supportedKeys = LookupJoinHintOptions.getRequiredOptions();
+                litmus.check(
+                        lookupHint.kvOptions.size() <= supportedKeys.size(),
+                        "Invalid LOOKUP hint options ");
+                try {
+                    // try to validate all hint options by parsing them
+                    conf.get(ASYNC_LOOKUP);
+                    conf.get(ASYNC_OUTPUT_MODE);
+                    conf.get(ASYNC_CAPACITY);
+                    conf.get(ASYNC_TIMEOUT);
+                    conf.get(RETRY_PREDICATE);
+                    conf.get(RETRY_STRATEGY);
+                    conf.get(FIXED_DELAY);
+                    conf.get(MAX_ATTEMPTS);
+                } catch (IllegalArgumentException e) {
+                    litmus.fail(
+                            "Invalid LOOKUP hint options, encounter parsing error: {}",
+                            e.getMessage());
+                }
+                return true;
+            };
 
     // ~ hint predicate ------------------------------------------------------------
 

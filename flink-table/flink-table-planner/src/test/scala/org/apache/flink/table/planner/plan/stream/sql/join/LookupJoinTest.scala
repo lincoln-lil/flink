@@ -544,6 +544,14 @@ class LookupJoinTest(legacyTableSource: Boolean) extends TableTestBase with Seri
     util.verifyExecPlan(sql)
   }
 
+  @Test
+  def testJoinHintWithTableNameOnly(): Unit = {
+    val sql = "SELECT /*+ LOOKUP('table'='D') */ * FROM MyTable AS T JOIN LookupTable " +
+      "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.a = D.id"
+
+    util.verifyExecPlan(sql)
+  }
+
   // ==========================================================================================
 
   private def createLookupTable(tableName: String, lookupFunction: UserDefinedFunction): Unit = {

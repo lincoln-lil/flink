@@ -38,6 +38,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.conversion.DataStructureConverter;
 import org.apache.flink.table.data.conversion.DataStructureConverters;
 import org.apache.flink.table.functions.AsyncTableFunction;
+import org.apache.flink.table.functions.LookupFunction;
 import org.apache.flink.table.functions.TableFunction;
 import org.apache.flink.table.functions.UserDefinedFunction;
 import org.apache.flink.table.functions.UserDefinedFunctionHelper;
@@ -52,6 +53,7 @@ import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeConfig;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeContext;
 import org.apache.flink.table.planner.plan.nodes.exec.InputProperty;
 import org.apache.flink.table.planner.plan.nodes.exec.SingleTransformationTranslator;
+import org.apache.flink.table.planner.plan.nodes.exec.spec.LookupJoinHintSpec;
 import org.apache.flink.table.planner.plan.nodes.exec.spec.TemporalTableSourceSpec;
 import org.apache.flink.table.planner.plan.nodes.exec.utils.ExecNodeUtil;
 import org.apache.flink.table.planner.plan.schema.LegacyTableSourceTable;
@@ -69,6 +71,7 @@ import org.apache.flink.table.runtime.operators.join.lookup.AsyncLookupJoinRunne
 import org.apache.flink.table.runtime.operators.join.lookup.AsyncLookupJoinWithCalcRunner;
 import org.apache.flink.table.runtime.operators.join.lookup.LookupJoinRunner;
 import org.apache.flink.table.runtime.operators.join.lookup.LookupJoinWithCalcRunner;
+import org.apache.flink.table.runtime.operators.join.lookup.RetryableLookupFunctionDelegator;
 import org.apache.flink.table.runtime.types.PlannerTypeUtils;
 import org.apache.flink.table.runtime.types.TypeInfoDataTypeConverter;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
@@ -150,6 +153,7 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
     public static final String FIELD_NAME_FILTER_ON_TEMPORAL_TABLE = "filterOnTemporalTable";
 
     public static final String FIELD_NAME_INPUT_INSERT_ONLY = "inputInsertOnly";
+    public static final String FIELD_NAME_JOIN_HINT = "joinHint";
 
     @JsonProperty(FIELD_NAME_JOIN_TYPE)
     private final FlinkJoinType joinType;
@@ -177,6 +181,9 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
     @JsonProperty(FIELD_NAME_INPUT_INSERT_ONLY)
     private final boolean inputInsertOnly;
 
+    @JsonProperty(FIELD_NAME_JOIN_HINT)
+    private final @Nullable LookupJoinHintSpec joinHintSpec;
+
     protected CommonExecLookupJoin(
             int id,
             ExecNodeContext context,
@@ -191,6 +198,7 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
             boolean inputInsertOnly,
             List<InputProperty> inputProperties,
             RowType outputType,
+            @Nullable LookupJoinHintSpec lookupJoinHintSpec,
             String description) {
         super(id, context, persistedConfig, inputProperties, outputType, description);
         checkArgument(inputProperties.size() == 1);
@@ -201,6 +209,7 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
         this.projectionOnTemporalTable = projectionOnTemporalTable;
         this.filterOnTemporalTable = filterOnTemporalTable;
         this.inputInsertOnly = inputInsertOnly;
+        this.joinHintSpec = lookupJoinHintSpec;
     }
 
     public TemporalTableSourceSpec getTemporalTableSourceSpec() {
@@ -222,25 +231,30 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
         RowType resultRowType = (RowType) getOutputType();
         validateLookupKeyType(lookupKeys, inputRowType, tableSourceRowType);
 
-        boolean isAsyncEnabled = false;
-        UserDefinedFunction userDefinedFunction =
-                LookupJoinUtil.getLookupFunction(temporalTable, lookupKeys.keySet());
-        UserDefinedFunctionHelper.prepareInstance(config, userDefinedFunction);
+        LookupJoinUtil.LookupMode lookupMode =
+                null == joinHintSpec || joinHintSpec.isAsync()
+                        ? LookupJoinUtil.LookupMode.ASYNC
+                        : LookupJoinUtil.LookupMode.SYNC;
 
-        if (userDefinedFunction instanceof AsyncTableFunction) {
-            isAsyncEnabled = true;
-        }
+        UserDefinedFunction selectLookupFunction =
+                LookupJoinUtil.getLookupFunction(
+                        temporalTable,
+                        lookupKeys.keySet(),
+                        LookupJoinUtil.Preference.PREFER,
+                        lookupMode);
+        UserDefinedFunctionHelper.prepareInstance(config, selectLookupFunction);
 
+        boolean asyncEnabled = selectLookupFunction instanceof AsyncTableFunction;
         boolean isLeftOuterJoin = joinType == FlinkJoinType.LEFT;
         StreamOperatorFactory<RowData> operatorFactory;
-        if (isAsyncEnabled) {
+        if (asyncEnabled) {
             operatorFactory =
                     createAsyncLookupJoin(
                             temporalTable,
                             config,
                             planner.getFlinkContext().getClassLoader(),
                             lookupKeys,
-                            (AsyncTableFunction<Object>) userDefinedFunction,
+                            (AsyncTableFunction<Object>) selectLookupFunction,
                             planner.createRelBuilder(),
                             inputRowType,
                             tableSourceRowType,
@@ -253,7 +267,7 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
                             config,
                             planner.getFlinkContext().getClassLoader(),
                             lookupKeys,
-                            (TableFunction<Object>) userDefinedFunction,
+                            (TableFunction<Object>) selectLookupFunction,
                             planner.createRelBuilder(),
                             inputRowType,
                             tableSourceRowType,
@@ -306,6 +320,27 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
         }
     }
 
+    private LookupJoinUtil.AsyncLookupOptions mergeAsyncOptions(ExecNodeConfig config) {
+        boolean hasJoinHint = joinHintSpec != null;
+        int asyncBufferCapacity =
+                hasJoinHint && joinHintSpec.getAsyncCapacity() != null
+                        ? joinHintSpec.getAsyncCapacity()
+                        : config.get(
+                                ExecutionConfigOptions.TABLE_EXEC_ASYNC_LOOKUP_BUFFER_CAPACITY);
+        long asyncTimeout =
+                hasJoinHint && joinHintSpec.getAsyncTimeout() != null
+                        ? joinHintSpec.getAsyncTimeout().toMillis()
+                        : config.get(ExecutionConfigOptions.TABLE_EXEC_ASYNC_LOOKUP_TIMEOUT)
+                                .toMillis();
+        ExecutionConfigOptions.AsyncOutputMode asyncOutputMode =
+                hasJoinHint && joinHintSpec.getAsyncOutputMode() != null
+                        ? joinHintSpec.getAsyncOutputMode()
+                        : config.get(ExecutionConfigOptions.TABLE_EXEC_ASYNC_LOOKUP_OUTPUT_MODE);
+
+        return new LookupJoinUtil.AsyncLookupOptions(
+                asyncBufferCapacity, asyncTimeout, asyncOutputMode);
+    }
+
     @SuppressWarnings("unchecked")
     private StreamOperatorFactory<RowData> createAsyncLookupJoin(
             RelOptTable temporalTable,
@@ -319,12 +354,7 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
             RowType resultRowType,
             boolean isLeftOuterJoin) {
 
-        int asyncBufferCapacity =
-                config.get(ExecutionConfigOptions.TABLE_EXEC_ASYNC_LOOKUP_BUFFER_CAPACITY);
-        long asyncTimeout =
-                config.get(ExecutionConfigOptions.TABLE_EXEC_ASYNC_LOOKUP_TIMEOUT).toMillis();
-        ExecutionConfigOptions.AsyncOutputMode asyncOutputMode =
-                config.get(ExecutionConfigOptions.TABLE_EXEC_ASYNC_LOOKUP_OUTPUT_MODE);
+        LookupJoinUtil.AsyncLookupOptions asyncLookupOptions = mergeAsyncOptions(config);
 
         DataTypeFactory dataTypeFactory =
                 ShortcutUtils.unwrapContext(relBuilder).getCatalogManager().getDataTypeFactory();
@@ -384,7 +414,7 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
                             generatedResultFuture,
                             InternalSerializers.create(rightRowType),
                             isLeftOuterJoin,
-                            asyncBufferCapacity);
+                            asyncLookupOptions.asyncBufferCapacity);
         } else {
             // right type is the same as table source row type, because no calc after temporal table
             asyncFunc =
@@ -394,11 +424,29 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
                             generatedResultFuture,
                             InternalSerializers.create(rightRowType),
                             isLeftOuterJoin,
-                            asyncBufferCapacity);
+                            asyncLookupOptions.asyncBufferCapacity);
         }
-
-        return new AsyncWaitOperatorFactory<>(
-                asyncFunc, asyncTimeout, asyncBufferCapacity, convert(asyncOutputMode));
+        /**
+         * why not implements async-retry directly in AsyncLookupFunction ? - because the active
+         * sleeping on async callback thread will occupy the task cpu time while the retry support
+         * in async data stream api provides a more efficient way via processing time service which
+         * does not occupy callback thread.
+         */
+        if (null != joinHintSpec) {
+            // simplify code here, not check whether ResultRetryStrategy is NO_RETRY_STRATEGY or not
+            return new AsyncWaitOperatorFactory<>(
+                    asyncFunc,
+                    asyncLookupOptions.asyncTimeout,
+                    asyncLookupOptions.asyncBufferCapacity,
+                    convert(asyncLookupOptions.asyncOutputMode),
+                    joinHintSpec.toRetryStrategy());
+        } else {
+            return new AsyncWaitOperatorFactory<>(
+                    asyncFunc,
+                    asyncLookupOptions.asyncTimeout,
+                    asyncLookupOptions.asyncBufferCapacity,
+                    convert(asyncLookupOptions.asyncOutputMode));
+        }
     }
 
     private AsyncDataStream.OutputMode convert(
@@ -422,6 +470,14 @@ public abstract class CommonExecLookupJoin extends ExecNodeBase<RowData>
             RowType resultRowType,
             boolean isLeftOuterJoin,
             boolean isObjectReuseEnabled) {
+
+        // wrap syncLookupFunction into a RetryableLookupFunctionDelegator to support retry, only
+        // LookupFunction is supported.
+        if (syncLookupFunction instanceof LookupFunction && null != joinHintSpec) {
+            syncLookupFunction =
+                    new RetryableLookupFunctionDelegator(
+                            (LookupFunction) syncLookupFunction, joinHintSpec.toRetryStrategy());
+        }
 
         DataTypeFactory dataTypeFactory =
                 ShortcutUtils.unwrapContext(relBuilder).getCatalogManager().getDataTypeFactory();

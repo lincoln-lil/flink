@@ -305,6 +305,9 @@ class AsyncLookupJoinITCase(
     fail("NumberFormatException is expected here!")
   }
 
+  // TODO add case with async hint
+
+  // TODO add case with retry hint
 }
 
 object AsyncLookupJoinITCase {

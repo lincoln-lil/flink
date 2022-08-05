@@ -529,6 +529,8 @@ class LookupJoinITCase(legacyTableSource: Boolean) extends StreamingTestBase {
     env.execute()
     assertEquals(Seq(), sink.getAppendResults)
   }
+
+  // TODO add case with retry hint
 }
 
 object LookupJoinITCase {

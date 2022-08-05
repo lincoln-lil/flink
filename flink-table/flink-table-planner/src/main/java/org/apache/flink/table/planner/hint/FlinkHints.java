@@ -26,6 +26,7 @@ import org.apache.calcite.rel.hint.Hintable;
 import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalProject;
+import org.apache.calcite.rel.logical.LogicalSnapshot;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -106,9 +107,10 @@ public abstract class FlinkHints {
     }
 
     public static boolean canTransposeToTableScan(RelNode node) {
-        // TODO support look up join
         return node instanceof LogicalProject // computed column on table
-                || node instanceof LogicalFilter;
+                || node instanceof LogicalFilter
+                // support look up join
+                || node instanceof LogicalSnapshot;
     }
 
     /** Returns the qualified name of a table scan, otherwise returns empty. */

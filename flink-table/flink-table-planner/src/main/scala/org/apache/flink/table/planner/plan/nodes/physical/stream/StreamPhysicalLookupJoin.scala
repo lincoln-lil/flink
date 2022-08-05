@@ -19,7 +19,7 @@ package org.apache.flink.table.planner.plan.nodes.physical.stream
 
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory
 import org.apache.flink.table.planner.plan.nodes.exec.{ExecNode, InputProperty}
-import org.apache.flink.table.planner.plan.nodes.exec.spec.TemporalTableSourceSpec
+import org.apache.flink.table.planner.plan.nodes.exec.spec.{LookupJoinHintSpec, TemporalTableSourceSpec}
 import org.apache.flink.table.planner.plan.nodes.exec.stream.StreamExecLookupJoin
 import org.apache.flink.table.planner.plan.nodes.physical.common.CommonPhysicalLookupJoin
 import org.apache.flink.table.planner.plan.utils.{ChangelogPlanUtils, FlinkRexUtil, JoinTypeUtil}
@@ -43,7 +43,8 @@ class StreamPhysicalLookupJoin(
     temporalTable: RelOptTable,
     tableCalcProgram: Option[RexProgram],
     joinInfo: JoinInfo,
-    joinType: JoinRelType)
+    joinType: JoinRelType,
+    lookupHintSpec: Option[LookupJoinHintSpec])
   extends CommonPhysicalLookupJoin(
     cluster,
     traitSet,
@@ -51,7 +52,8 @@ class StreamPhysicalLookupJoin(
     temporalTable,
     tableCalcProgram,
     joinInfo,
-    joinType)
+    joinType,
+    lookupHintSpec)
   with StreamPhysicalRel {
 
   override def requireWatermark: Boolean = false
@@ -64,7 +66,8 @@ class StreamPhysicalLookupJoin(
       temporalTable,
       tableCalcProgram,
       joinInfo,
-      joinType)
+      joinType,
+      lookupHintSpec)
   }
 
   override def translateToExecNode(): ExecNode[_] = {
@@ -86,6 +89,7 @@ class StreamPhysicalLookupJoin(
       ChangelogPlanUtils.inputInsertOnly(this),
       InputProperty.DEFAULT,
       FlinkTypeFactory.toLogicalRowType(getRowType),
+      lookupHintSpec.orNull,
       getRelDetailedDescription)
   }
 

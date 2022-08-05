@@ -46,7 +46,10 @@ public enum JoinStrategy {
      * Instructs the optimizer to use nest loop join strategy. If both sides are specified in this
      * hint, the side that is first written will be treated as the build side.
      */
-    NEST_LOOP("NEST_LOOP");
+    NEST_LOOP("NEST_LOOP"),
+
+    /** Instructs the optimizer to use lookup join strategy. Only accept key-value hint options. */
+    LOOKUP("LOOKUP");
 
     private final String joinHintName;
 
@@ -93,6 +96,9 @@ public enum JoinStrategy {
             case BROADCAST:
             case NEST_LOOP:
                 return options.size() > 0;
+            case LOOKUP:
+                // TODO ? lookup join hint use key-value options, not list options
+                return null == options || options.size() == 0;
         }
         return false;
     }

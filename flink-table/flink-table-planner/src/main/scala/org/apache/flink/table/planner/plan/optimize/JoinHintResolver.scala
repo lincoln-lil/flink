@@ -20,6 +20,7 @@ package org.apache.flink.table.planner.plan.optimize
 import org.apache.flink.table.api.ValidationException
 import org.apache.flink.table.planner.JHashSet
 import org.apache.flink.table.planner.hint.{FlinkHints, JoinStrategy}
+import org.apache.flink.table.planner.plan.schema.{LegacyTableSourceTable, TableSourceTable}
 
 import org.apache.calcite.plan.hep.HepRelVertex
 import org.apache.calcite.plan.volcano.RelSubset
@@ -73,7 +74,15 @@ class JoinHintResolver {
         .flatMap(
           h =>
             if (JoinStrategy.isJoinStrategy(h.hintName)) {
-              allHints.add(trimInheritPath(h))
+              // TODO port to java
+              val joinStrategy = JoinStrategy.getJoinStrategy(h.hintName)
+              if (joinStrategy == JoinStrategy.LOOKUP) {
+                // lookup join use key-value syntax only
+                // match the table or alias name
+
+              }
+
+              allHints.add((h))
               // if the hint is valid
               val newOptions = h.listOptions
                 .map(
@@ -154,7 +163,7 @@ class JoinHintResolver {
       throw new ValidationException(
         String.format(
           "The options of following hints cannot match the name of " +
-            "input tables or views: %s",
+            "input tables or views:trimInheritPath %s",
           msg))
     }
   }
@@ -168,10 +177,11 @@ class JoinHintResolver {
     // otherwise, the option may be a table name
     val tableScan = getTableScan(node)
     if (tableScan.isDefined) {
-      val tableName = FlinkHints.getTableName(tableScan.get.getTable)
-      if (tableName.isPresent) {
-        return Some(tableName.get())
+      val tableName = tableScan.get.getTable match {
+        case tst: TableSourceTable => tst.contextResolvedTable.getIdentifier
+        case ltt: LegacyTableSourceTable[_] => ltt.tableIdentifier
       }
+      return Some(tableName.asSummaryString)
     }
 
     None

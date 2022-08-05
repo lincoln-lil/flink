@@ -20,6 +20,7 @@ package org.apache.flink.table.planner.plan.utils;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.connector.source.AsyncTableFunctionProvider;
 import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.TableFunctionProvider;
@@ -138,6 +139,40 @@ public final class LookupJoinUtil {
         // no instantiation
     }
 
+    /** Lookup mode of a LookupFunction, either sync or async. */
+    public enum LookupMode {
+        /** Sync lookup mode. */
+        SYNC,
+
+        /** Async lookup mode. */
+        ASYNC
+    }
+
+    /** Preference includes three levels: require/prefer/none. */
+    public enum Preference {
+        /** Require: must be satisfied. */
+        REQUIRE,
+
+        /** Prefer: try to satisfy the preference or use default strategy. */
+        PREFER,
+    }
+
+    /** AsyncLookupOptions includes async related options. */
+    public static class AsyncLookupOptions {
+        public final int asyncBufferCapacity;
+        public final long asyncTimeout;
+        public final ExecutionConfigOptions.AsyncOutputMode asyncOutputMode;
+
+        public AsyncLookupOptions(
+                int asyncBufferCapacity,
+                long asyncTimeout,
+                ExecutionConfigOptions.AsyncOutputMode asyncOutputMode) {
+            this.asyncBufferCapacity = asyncBufferCapacity;
+            this.asyncTimeout = asyncTimeout;
+            this.asyncOutputMode = asyncOutputMode;
+        }
+    }
+
     /** Gets lookup keys sorted by index in ascending order. */
     public static int[] getOrderedLookupKeys(Collection<Integer> allLookupKeys) {
         List<Integer> lookupKeyIndicesInOrder = new ArrayList<>(allLookupKeys);
@@ -145,33 +180,33 @@ public final class LookupJoinUtil {
         return lookupKeyIndicesInOrder.stream().mapToInt(Integer::intValue).toArray();
     }
 
-    /** Gets LookupFunction from temporal table according to the given lookup keys. */
+    /**
+     * Gets LookupFunction from temporal table according to the given lookup keys with preference.
+     *
+     * @return the UserDefinedFunction by preferable lookup mode, if require
+     */
     public static UserDefinedFunction getLookupFunction(
-            RelOptTable temporalTable, Collection<Integer> lookupKeys) {
-
-        int[] lookupKeyIndicesInOrder = getOrderedLookupKeys(lookupKeys);
-
+            RelOptTable temporalTable,
+            Collection<Integer> lookupKeys,
+            Preference preference,
+            LookupMode lookupMode) {
+        UserDefinedFunction syncLookupFunctions = null;
+        UserDefinedFunction asyncLookupFunctions = null;
         if (temporalTable instanceof TableSourceTable) {
-            // TODO: support nested lookup keys in the future,
-            //  currently we only support top-level lookup keys
-            int[][] indices =
-                    IntStream.of(lookupKeyIndicesInOrder)
-                            .mapToObj(i -> new int[] {i})
-                            .toArray(int[][]::new);
             LookupTableSource tableSource =
                     (LookupTableSource) ((TableSourceTable) temporalTable).tableSource();
-            LookupRuntimeProviderContext providerContext =
-                    new LookupRuntimeProviderContext(indices);
+            LookupRuntimeProviderContext providerContext = createContext(lookupKeys);
             LookupTableSource.LookupRuntimeProvider provider =
                     tableSource.getLookupRuntimeProvider(providerContext);
             if (provider instanceof TableFunctionProvider) {
-                return ((TableFunctionProvider<?>) provider).createTableFunction();
+                syncLookupFunctions = ((TableFunctionProvider<?>) provider).createTableFunction();
             } else if (provider instanceof AsyncTableFunctionProvider) {
-                return ((AsyncTableFunctionProvider<?>) provider).createAsyncTableFunction();
+                asyncLookupFunctions =
+                        ((AsyncTableFunctionProvider<?>) provider).createAsyncTableFunction();
             }
         }
-
         if (temporalTable instanceof LegacyTableSourceTable) {
+            int[] lookupKeyIndicesInOrder = getOrderedLookupKeys(lookupKeys);
             String[] lookupFieldNamesInOrder =
                     IntStream.of(lookupKeyIndicesInOrder)
                             .mapToObj(temporalTable.getRowType().getFieldNames()::get)
@@ -181,14 +216,72 @@ public final class LookupJoinUtil {
             LookupableTableSource<?> tableSource =
                     (LookupableTableSource<?>) legacyTableSourceTable.tableSource();
             if (tableSource.isAsyncEnabled()) {
-                return tableSource.getAsyncLookupFunction(lookupFieldNamesInOrder);
+                asyncLookupFunctions = tableSource.getAsyncLookupFunction(lookupFieldNamesInOrder);
             } else {
-                return tableSource.getLookupFunction(lookupFieldNamesInOrder);
+                syncLookupFunctions = tableSource.getLookupFunction(lookupFieldNamesInOrder);
             }
         }
-        throw new TableException(
-                String.format(
-                        "table %s is neither TableSourceTable not LegacyTableSourceTable",
-                        temporalTable.getQualifiedName()));
+        UserDefinedFunction selectLookupFunction =
+                selectLookupFunction(
+                        asyncLookupFunctions, syncLookupFunctions, preference, lookupMode);
+
+        if (null == selectLookupFunction) {
+            throw new TableException(
+                    String.format(
+                            "table %s does offer a valid lookup function neither as TableSourceTable nor LegacyTableSourceTable, preference is: %s %s",
+                            temporalTable.getQualifiedName(), preference, lookupMode));
+        }
+        return selectLookupFunction;
+    }
+
+    private static UserDefinedFunction selectLookupFunction(
+            UserDefinedFunction asyncLookupFunction,
+            UserDefinedFunction syncLookupFunction,
+            Preference preference,
+            LookupMode lookupMode) {
+        UserDefinedFunction selectLookupFunction;
+        switch (preference) {
+            case REQUIRE:
+                selectLookupFunction =
+                        lookupMode == LookupMode.ASYNC ? asyncLookupFunction : syncLookupFunction;
+                break;
+            case PREFER:
+                if (lookupMode == LookupMode.ASYNC) {
+                    // prefer async
+                    selectLookupFunction =
+                            null != asyncLookupFunction ? asyncLookupFunction : syncLookupFunction;
+                } else {
+                    // prefer sync
+                    selectLookupFunction =
+                            null != syncLookupFunction ? syncLookupFunction : asyncLookupFunction;
+                }
+                break;
+            default:
+                // no preference, async first
+                selectLookupFunction =
+                        null != asyncLookupFunction ? asyncLookupFunction : syncLookupFunction;
+                break;
+        }
+        return selectLookupFunction;
+    }
+
+    /**
+     * Gets LookupFunction from temporal table according to the given lookup keys without
+     * preference.
+     */
+    public static UserDefinedFunction getLookupFunction(
+            RelOptTable temporalTable, Collection<Integer> lookupKeys) {
+        return getLookupFunction(temporalTable, lookupKeys, Preference.PREFER, LookupMode.ASYNC);
+    }
+
+    private static LookupRuntimeProviderContext createContext(Collection<Integer> lookupKeys) {
+        int[] lookupKeyIndicesInOrder = getOrderedLookupKeys(lookupKeys);
+        // TODO: support nested lookup keys in the future,
+        //  currently we only support top-level lookup keys
+        int[][] indices =
+                IntStream.of(lookupKeyIndicesInOrder)
+                        .mapToObj(i -> new int[] {i})
+                        .toArray(int[][]::new);
+        return new LookupRuntimeProviderContext(indices);
     }
 }

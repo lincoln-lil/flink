@@ -75,7 +75,11 @@ abstract class CommonSubGraphBasedOptimizer extends Optimizer {
    *   a list of RelNode represents an optimized RelNode DAG.
    */
   override def optimize(roots: Seq[RelNode]): Seq[RelNode] = {
-    val sinkBlocks = doOptimize(roots)
+    // resolve hints before optimizing
+    val joinHintResolver = new JoinHintResolver()
+    val resolvedRoots = joinHintResolver.resolve(roots)
+
+    val sinkBlocks = doOptimize(resolvedRoots)
     val optimizedPlan = sinkBlocks.map {
       block =>
         val plan = block.getOptimizedPlan

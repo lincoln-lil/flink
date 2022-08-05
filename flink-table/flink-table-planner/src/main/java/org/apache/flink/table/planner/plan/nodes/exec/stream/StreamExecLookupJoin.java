@@ -25,6 +25,7 @@ import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeContext;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeMetadata;
 import org.apache.flink.table.planner.plan.nodes.exec.InputProperty;
 import org.apache.flink.table.planner.plan.nodes.exec.common.CommonExecLookupJoin;
+import org.apache.flink.table.planner.plan.nodes.exec.spec.LookupJoinHintSpec;
 import org.apache.flink.table.planner.plan.nodes.exec.spec.TemporalTableSourceSpec;
 import org.apache.flink.table.planner.plan.utils.LookupJoinUtil;
 import org.apache.flink.table.runtime.operators.join.FlinkJoinType;
@@ -60,6 +61,7 @@ public class StreamExecLookupJoin extends CommonExecLookupJoin implements Stream
             boolean inputInsertOnly,
             InputProperty inputProperty,
             RowType outputType,
+            @Nullable LookupJoinHintSpec lookupJoinHintSpec,
             String description) {
         this(
                 ExecNodeContext.newNodeId(),
@@ -74,6 +76,7 @@ public class StreamExecLookupJoin extends CommonExecLookupJoin implements Stream
                 inputInsertOnly,
                 Collections.singletonList(inputProperty),
                 outputType,
+                lookupJoinHintSpec,
                 description);
     }
 
@@ -94,6 +97,7 @@ public class StreamExecLookupJoin extends CommonExecLookupJoin implements Stream
             @JsonProperty(FIELD_NAME_INPUT_INSERT_ONLY) @Nullable Boolean inputInsertOnly,
             @JsonProperty(FIELD_NAME_INPUT_PROPERTIES) List<InputProperty> inputProperties,
             @JsonProperty(FIELD_NAME_OUTPUT_TYPE) RowType outputType,
+            @JsonProperty(FIELD_NAME_JOIN_HINT) @Nullable LookupJoinHintSpec lookupJoinHintSpec,
             @JsonProperty(FIELD_NAME_DESCRIPTION) String description) {
         super(
                 id,
@@ -108,6 +112,7 @@ public class StreamExecLookupJoin extends CommonExecLookupJoin implements Stream
                 inputInsertOnly,
                 inputProperties,
                 outputType,
+                lookupJoinHintSpec,
                 description);
     }
 }

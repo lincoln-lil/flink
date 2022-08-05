@@ -41,9 +41,14 @@ public class SubQueryAliasNodeClearShuttle extends RelShuttleImpl {
                     RelHint.builder(FlinkHints.HINT_ALIAS)
                             .hintOption(((SubQueryAlias) node).getAliasName())
                             .build();
-            RelNode newNode =
-                    ((Hintable) ((SubQueryAlias) node).getInput())
-                            .attachHints(Collections.singletonList(aliasTag));
+            RelNode newNode;
+            if (((SubQueryAlias) node).getInput() instanceof Hintable) {
+                newNode =
+                        ((Hintable) ((SubQueryAlias) node).getInput())
+                                .attachHints(Collections.singletonList(aliasTag));
+            } else {
+                newNode = ((SubQueryAlias) node).getInput();
+            }
             return super.visit(newNode);
         }
 
