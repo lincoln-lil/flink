@@ -18,7 +18,11 @@
 
 package org.apache.flink.table.planner.hint;
 
+import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.planner.plan.rules.logical.WrapJsonAggFunctionArgumentsRule;
+
+import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableSet;
 
 import org.apache.calcite.rel.hint.HintOptionChecker;
 import org.apache.calcite.rel.hint.HintPredicates;
@@ -82,6 +86,13 @@ public abstract class FlinkHintStrategies {
                         HintStrategy.builder(HintPredicates.JOIN)
                                 .optionChecker(NON_EMPTY_LIST_OPTION_CHECKER)
                                 .build())
+                .hintStrategy(
+                        JoinStrategy.LOOKUP.getJoinHintName(),
+                        HintStrategy.builder(
+                                        HintPredicates.or(
+                                                HintPredicates.CORRELATE, HintPredicates.JOIN))
+                                .optionChecker(LOOKUP_NON_EMPTY_KV_OPTION_CHECKER)
+                                .build())
                 .build();
     }
 
@@ -107,4 +118,32 @@ public abstract class FlinkHintStrategies {
                                     + "one table or view specified in hint {}.",
                             FlinkHints.stringifyHints(Collections.singletonList(hint)),
                             hint.hintName);
+
+    private static final HintOptionChecker LOOKUP_NON_EMPTY_KV_OPTION_CHECKER =
+            (lookupHint, litmus) -> {
+                litmus.check(
+                        lookupHint.listOptions.size() == 0,
+                        "Invalid list options in LOOKUP hint, only support key-value options.");
+
+                Configuration conf = Configuration.fromMap(lookupHint.kvOptions);
+                ImmutableSet<ConfigOption> requiredKeys =
+                        LookupJoinHintOptions.getRequiredOptions();
+                litmus.check(
+                        requiredKeys.stream().allMatch(conf::contains),
+                        "Invalid LOOKUP hint: incomplete required option(s): {}",
+                        requiredKeys);
+
+                ImmutableSet<ConfigOption> supportedKeys =
+                        LookupJoinHintOptions.getSupportedOptions();
+                litmus.check(
+                        lookupHint.kvOptions.size() <= supportedKeys.size(),
+                        "Invalid LOOKUP hint options ");
+                try {
+                    // try to validate all hint options by parsing them
+                    supportedKeys.forEach(conf::get);
+                } catch (IllegalArgumentException e) {
+                    litmus.fail("Invalid LOOKUP hint options, parsing error: {}", e.getMessage());
+                }
+                return true;
+            };
 }

@@ -20,6 +20,7 @@ package org.apache.flink.table.planner.plan.utils;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.connector.source.AsyncTableFunctionProvider;
 import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.TableFunctionProvider;
@@ -138,6 +139,22 @@ public final class LookupJoinUtil {
         // no instantiation
     }
 
+    /** AsyncLookupOptions includes async related options. */
+    public static class AsyncLookupOptions {
+        public final int asyncBufferCapacity;
+        public final long asyncTimeout;
+        public final ExecutionConfigOptions.AsyncOutputMode asyncOutputMode;
+
+        public AsyncLookupOptions(
+                int asyncBufferCapacity,
+                long asyncTimeout,
+                ExecutionConfigOptions.AsyncOutputMode asyncOutputMode) {
+            this.asyncBufferCapacity = asyncBufferCapacity;
+            this.asyncTimeout = asyncTimeout;
+            this.asyncOutputMode = asyncOutputMode;
+        }
+    }
+
     /** Gets lookup keys sorted by index in ascending order. */
     public static int[] getOrderedLookupKeys(Collection<Integer> allLookupKeys) {
         List<Integer> lookupKeyIndicesInOrder = new ArrayList<>(allLookupKeys);
@@ -145,22 +162,20 @@ public final class LookupJoinUtil {
         return lookupKeyIndicesInOrder.stream().mapToInt(Integer::intValue).toArray();
     }
 
-    /** Gets LookupFunction from temporal table according to the given lookup keys. */
-    public static UserDefinedFunction getLookupFunction(
-            RelOptTable temporalTable, Collection<Integer> lookupKeys) {
-        return getLookupFunction(temporalTable, lookupKeys, false);
-    }
-
     /**
-     * Gets LookupFunction from temporal table according to the given lookup keys. If specifies
-     * requireSyncLookup, then only sync function will be created or raise an error if not
-     * implemented.
+     * Gets LookupFunction from temporal table according to the given lookup keys with preference.
+     *
+     * @return the UserDefinedFunction by preferable lookup mode, if require
      */
     public static UserDefinedFunction getLookupFunction(
-            RelOptTable temporalTable, Collection<Integer> lookupKeys, boolean requireSyncLookup) {
+            RelOptTable temporalTable,
+            Collection<Integer> lookupKeys,
+            boolean require,
+            boolean async) {
+        UserDefinedFunction syncLookupFunctions = null;
+        UserDefinedFunction asyncLookupFunctions = null;
 
         int[] lookupKeyIndicesInOrder = getOrderedLookupKeys(lookupKeys);
-
         if (temporalTable instanceof TableSourceTable) {
             // TODO: support nested lookup keys in the future,
             //  currently we only support top-level lookup keys
@@ -168,6 +183,7 @@ public final class LookupJoinUtil {
                     IntStream.of(lookupKeyIndicesInOrder)
                             .mapToObj(i -> new int[] {i})
                             .toArray(int[][]::new);
+
             LookupTableSource tableSource =
                     (LookupTableSource) ((TableSourceTable) temporalTable).tableSource();
             LookupRuntimeProviderContext providerContext =
@@ -175,20 +191,13 @@ public final class LookupJoinUtil {
             LookupTableSource.LookupRuntimeProvider provider =
                     tableSource.getLookupRuntimeProvider(providerContext);
 
-            if (requireSyncLookup && !(provider instanceof TableFunctionProvider)) {
-                throw new TableException(
-                        String.format(
-                                "Require a synchronous TableFunction due to planner's requirement but no TableFunctionProvider "
-                                        + "found in TableSourceTable: %s, please check the code to ensure a proper TableFunctionProvider is specified.",
-                                temporalTable.getQualifiedName()));
-            }
             if (provider instanceof TableFunctionProvider) {
-                return ((TableFunctionProvider<?>) provider).createTableFunction();
+                syncLookupFunctions = ((TableFunctionProvider<?>) provider).createTableFunction();
             } else if (provider instanceof AsyncTableFunctionProvider) {
-                return ((AsyncTableFunctionProvider<?>) provider).createAsyncTableFunction();
+                asyncLookupFunctions =
+                        ((AsyncTableFunctionProvider<?>) provider).createAsyncTableFunction();
             }
         }
-
         if (temporalTable instanceof LegacyTableSourceTable) {
             String[] lookupFieldNamesInOrder =
                     IntStream.of(lookupKeyIndicesInOrder)
@@ -198,24 +207,55 @@ public final class LookupJoinUtil {
                     (LegacyTableSourceTable<?>) temporalTable;
             LookupableTableSource<?> tableSource =
                     (LookupableTableSource<?>) legacyTableSourceTable.tableSource();
-            if (!requireSyncLookup && tableSource.isAsyncEnabled()) {
-                return tableSource.getAsyncLookupFunction(lookupFieldNamesInOrder);
+            if (tableSource.isAsyncEnabled()) {
+                asyncLookupFunctions = tableSource.getAsyncLookupFunction(lookupFieldNamesInOrder);
             } else {
-                UserDefinedFunction lookupFunc =
-                        tableSource.getLookupFunction(lookupFieldNamesInOrder);
-                if (null == lookupFunc) {
-                    throw new TableException(
-                            String.format(
-                                    "Require a synchronous TableFunction due to planner's requirement but can not create one from "
-                                            + "LegacyTableSourceTable: %s, please check the code to ensure getLookupFunction is implemented.",
-                                    temporalTable.getQualifiedName()));
-                }
-                return lookupFunc;
+                syncLookupFunctions = tableSource.getLookupFunction(lookupFieldNamesInOrder);
             }
         }
-        throw new TableException(
-                String.format(
-                        "table %s is neither TableSourceTable not LegacyTableSourceTable",
-                        temporalTable.getQualifiedName()));
+        UserDefinedFunction selectLookupFunction =
+                selectLookupFunction(asyncLookupFunctions, syncLookupFunctions, require, async);
+
+        if (null == selectLookupFunction) {
+            StringBuilder errorMsg = new StringBuilder();
+            if (require) {
+                errorMsg.append("Required ")
+                        .append(async ? "async" : "sync")
+                        .append(" lookup function by planner, but ");
+            }
+            errorMsg.append("table ")
+                    .append(temporalTable.getQualifiedName())
+                    .append(
+                            "does not offer a valid lookup function neither as TableSourceTable nor LegacyTableSourceTable");
+            throw new TableException(errorMsg.toString());
+        }
+        return selectLookupFunction;
+    }
+
+    private static UserDefinedFunction selectLookupFunction(
+            UserDefinedFunction asyncLookupFunction,
+            UserDefinedFunction syncLookupFunction,
+            boolean require,
+            boolean async) {
+        if (require) {
+            return async ? asyncLookupFunction : syncLookupFunction;
+        } else {
+            if (async) {
+                // prefer async
+                return null != asyncLookupFunction ? asyncLookupFunction : syncLookupFunction;
+            }
+            // prefer sync
+            return null != syncLookupFunction ? syncLookupFunction : asyncLookupFunction;
+        }
+    }
+
+    /**
+     * Gets LookupFunction from temporal table according to the given lookup keys without
+     * preference.
+     */
+    public static UserDefinedFunction getLookupFunction(
+            RelOptTable temporalTable, Collection<Integer> lookupKeys) {
+        // prefer(not require) async by default
+        return getLookupFunction(temporalTable, lookupKeys, false, true);
     }
 }

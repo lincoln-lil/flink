@@ -22,6 +22,7 @@ import org.apache.flink.table.catalog.{ObjectIdentifier, UniqueConstraint}
 import org.apache.flink.table.functions.{AsyncTableFunction, TableFunction, UserDefinedFunction}
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory
 import org.apache.flink.table.planner.plan.nodes.FlinkRelNode
+import org.apache.flink.table.planner.plan.nodes.exec.spec.LookupJoinHintSpec
 import org.apache.flink.table.planner.plan.schema.{IntermediateRelTable, LegacyTableSourceTable, TableSourceTable}
 import org.apache.flink.table.planner.plan.utils.{ExpressionFormat, JoinTypeUtil, LookupJoinUtil, RelExplainUtil}
 import org.apache.flink.table.planner.plan.utils.ExpressionFormat.ExpressionFormat
@@ -82,7 +83,8 @@ abstract class CommonPhysicalLookupJoin(
     val temporalTable: RelOptTable,
     val calcOnTemporalTable: Option[RexProgram],
     val joinInfo: JoinInfo,
-    val joinType: JoinRelType)
+    val joinType: JoinRelType,
+    val lookupHintSpec: Option[LookupJoinHintSpec] = Option.empty[LookupJoinHintSpec])
   extends SingleRel(cluster, traitSet, inputRel)
   with FlinkRelNode {
 

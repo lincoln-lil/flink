@@ -543,6 +543,127 @@ class LookupJoinTest(legacyTableSource: Boolean) extends TableTestBase with Seri
     util.verifyExecPlan(sql)
   }
 
+  @Test
+  def testInvalidJoinHint(): Unit = {
+    // lost required hint option 'table'
+    expectExceptionThrown(
+      """
+        |SELECT /*+ LOOKUP('tableName'='LookupTable') */ * 
+        |FROM MyTable AS T 
+        |JOIN LookupTable FOR SYSTEM_TIME AS OF T.proctime AS D 
+        | ON T.a = D.id
+        |""".stripMargin,
+      "Invalid LOOKUP hint: incomplete required option(s): [Key: 'table' , default: null (fallback keys: [])]",
+      classOf[AssertionError]
+    )
+
+    // invalid async option value
+    expectExceptionThrown(
+      """
+        |SELECT /*+ LOOKUP('table'='LookupTable', 'async'='yes') */ * 
+        |FROM MyTable AS T 
+        |JOIN LookupTable FOR SYSTEM_TIME AS OF T.proctime AS D 
+        | ON T.a = D.id
+        |""".stripMargin,
+      "Invalid LOOKUP hint options, parsing error: Could not parse value 'yes' for key 'async'",
+      classOf[AssertionError]
+    )
+
+    // invalid async output-mode option value
+    expectExceptionThrown(
+      """
+        |SELECT /*+ LOOKUP('tableName'='LookupTable', 'async'='true', 'output-mode'='allow_unordered') */ * 
+        |FROM MyTable AS T 
+        |JOIN LookupTable FOR SYSTEM_TIME AS OF T.proctime AS D 
+        | ON T.a = D.id
+        |""".stripMargin,
+      "Invalid LOOKUP hint options, parsing error: Could not parse value 'yes' for key 'async'",
+      classOf[AssertionError]
+    )
+
+    // invalid async output-mode option value
+    expectExceptionThrown(
+      """
+        |SELECT /*+ LOOKUP('tableName'='LookupTable', 'async'='true', 'timeout'='300 si') */ * 
+        |FROM MyTable AS T 
+        |JOIN LookupTable FOR SYSTEM_TIME AS OF T.proctime AS D 
+        | ON T.a = D.id
+        |""".stripMargin,
+      "",
+      classOf[ValidationException]
+    )
+
+    // invalid retry-predicate option value
+    expectExceptionThrown(
+      """
+        |SELECT /*+ LOOKUP('tableName'='LookupTable', 'retry-predicate'='exception') */ * 
+        |FROM MyTable AS T 
+        |JOIN LookupTable FOR SYSTEM_TIME AS OF T.proctime AS D 
+        | ON T.a = D.id
+        |""".stripMargin,
+      "",
+      classOf[ValidationException]
+    )
+
+    // invalid retry-strategy option value
+    expectExceptionThrown(
+      """
+        |SELECT /*+ LOOKUP('tableName'='LookupTable', 'retry-strategy'='fixed_delay') */ * 
+        |FROM MyTable AS T 
+        |JOIN LookupTable FOR SYSTEM_TIME AS OF T.proctime AS D 
+        | ON T.a = D.id
+        |""".stripMargin,
+      "",
+      classOf[ValidationException]
+    )
+
+    // invalid retry fixed-delay option value
+    expectExceptionThrown(
+      """
+        |SELECT /*+ LOOKUP('tableName'='LookupTable', 'fixed-delay'='100 ns') */ * 
+        |FROM MyTable AS T 
+        |JOIN LookupTable FOR SYSTEM_TIME AS OF T.proctime AS D 
+        | ON T.a = D.id
+        |""".stripMargin,
+      "",
+      classOf[ValidationException]
+    )
+
+    // invalid retry-strategy option value
+    expectExceptionThrown(
+      """
+        |SELECT /*+ LOOKUP('tableName'='LookupTable', 'fixed-delay'='100 ns') */ * 
+        |FROM MyTable AS T 
+        |JOIN LookupTable FOR SYSTEM_TIME AS OF T.proctime AS D 
+        | ON T.a = D.id
+        |""".stripMargin,
+      "",
+      classOf[ValidationException]
+    )
+
+  }
+
+  @Test
+  def testJoinHintWithTableAlias(): Unit = {
+    // TODO to be supported in FLINK-xxx (to make LogicalSnapshot Hintable)
+    thrown.expectMessage("")
+    thrown.expect(classOf[TableException])
+    val sql = "SELECT /*+ LOOKUP('table'='D') */ * FROM MyTable AS T JOIN LookupTable " +
+      "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.a = D.id"
+
+    util.verifyExecPlan(sql)
+    //    util.verifyJsonPlan(sql)
+  }
+
+  @Test
+  def testJoinHintWithTableNameOnly(): Unit = {
+    val sql = "SELECT /*+ LOOKUP('table'='LookupTable') */ * FROM MyTable AS T JOIN LookupTable " +
+      "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.a = D.id"
+
+    util.verifyExecPlan(sql)
+//    util.verifyJsonPlan(sql)
+  }
+
   // ==========================================================================================
 
   private def createLookupTable(tableName: String, lookupFunction: UserDefinedFunction): Unit = {

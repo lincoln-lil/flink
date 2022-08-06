@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.planner.plan.optimize;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.planner.hint.FlinkHints;
 import org.apache.flink.table.planner.hint.JoinStrategy;
@@ -30,6 +31,7 @@ import org.apache.calcite.rel.RelShuttleImpl;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.hint.Hintable;
 import org.apache.calcite.rel.hint.RelHint;
+import org.apache.calcite.rel.logical.LogicalCorrelate;
 import org.apache.calcite.rel.logical.LogicalJoin;
 import org.apache.calcite.util.Util;
 import org.apache.commons.lang3.StringUtils;
@@ -42,6 +44,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static java.util.Collections.singletonList;
+import static org.apache.flink.table.planner.hint.LookupJoinHintOptions.LOOKUP_TABLE;
 
 /**
  * Resolve and validate Hints, currently only join hints are supported.
@@ -65,6 +68,11 @@ public class JoinHintResolver extends RelShuttleImpl {
         return visitBiRel(join);
     }
 
+    @Override
+    public RelNode visit(LogicalCorrelate correlate) {
+        return visitBiRel(correlate);
+    }
+
     private RelNode visitBiRel(BiRel biRel) {
         Optional<String> leftName = extractAliasOrTableName(biRel.getLeft());
         Optional<String> rightName = extractAliasOrTableName(biRel.getRight());
@@ -76,7 +84,22 @@ public class JoinHintResolver extends RelShuttleImpl {
                         .getHints().stream()
                                 .flatMap(
                                         h -> {
-                                            if (JoinStrategy.isJoinStrategy(h.hintName)) {
+                                            if (JoinStrategy.isLookupHint(h.hintName)) {
+                                                allHints.add(trimInheritPath(h));
+                                                Configuration conf =
+                                                        Configuration.fromMap(h.kvOptions);
+                                                // hint option checker has done the validation
+                                                String lookupTable = conf.get(LOOKUP_TABLE);
+                                                assert null != lookupTable;
+                                                if (rightName.isPresent()
+                                                        && matchIdentifier(
+                                                                lookupTable, rightName.get())) {
+                                                    validHints.add(trimInheritPath(h));
+                                                    return Stream.of(h);
+                                                }
+                                                return Stream.of();
+
+                                            } else if (JoinStrategy.isJoinStrategy(h.hintName)) {
                                                 allHints.add(trimInheritPath(h));
                                                 // if the hint is valid
                                                 List<String> newOptions =
