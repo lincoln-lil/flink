@@ -20,8 +20,7 @@ package org.apache.flink.table.planner.hint;
 
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.planner.plan.rules.logical.WrapJsonAggFunctionArgumentsRule;
-import org.apache.flink.table.planner.plan.schema.LegacyTableSourceTable;
-import org.apache.flink.table.planner.plan.schema.TableSourceTable;
+import org.apache.flink.table.planner.plan.schema.FlinkPreparingTableBase;
 
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.rel.RelNode;
@@ -29,6 +28,7 @@ import org.apache.calcite.rel.hint.Hintable;
 import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalProject;
+import org.apache.calcite.rel.logical.LogicalSnapshot;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -109,9 +109,10 @@ public abstract class FlinkHints {
     }
 
     public static boolean canTransposeToTableScan(RelNode node) {
-        // TODO support look up join
         return node instanceof LogicalProject // computed column on table
-                || node instanceof LogicalFilter;
+                || node instanceof LogicalFilter
+                // TODO to support alias for lookup join (we should make Snapshot Hintable)
+                || node instanceof LogicalSnapshot;
     }
 
     /** Returns the qualified name of a table scan, otherwise returns empty. */
@@ -119,24 +120,14 @@ public abstract class FlinkHints {
         if (table == null) {
             return Optional.empty();
         }
-
-        String tableName;
-        if (table instanceof TableSourceTable) {
-            tableName =
-                    ((TableSourceTable) table)
-                            .contextResolvedTable()
-                            .getIdentifier()
-                            .asSummaryString();
-        } else if (table instanceof LegacyTableSourceTable) {
-            tableName = ((LegacyTableSourceTable<?>) table).tableIdentifier().asSummaryString();
+        if (table instanceof FlinkPreparingTableBase) {
+            return Optional.of(String.join(".", ((FlinkPreparingTableBase) table).getNames()));
         } else {
             throw new TableException(
                     String.format(
                             "Could not get the table name with the unknown table class `%s`",
                             table.getClass().getCanonicalName()));
         }
-
-        return Optional.of(tableName);
     }
 
     public static String stringifyHints(List<RelHint> hints) {
