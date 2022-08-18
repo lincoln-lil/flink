@@ -228,6 +228,11 @@ public final class LookupJoinUtil {
         public int hashCode() {
             return Objects.hash(asyncBufferCapacity, asyncTimeout, asyncOutputMode);
         }
+
+        @Override
+        public String toString() {
+            return asyncOutputMode + ", " + asyncTimeout + "ms, " + asyncBufferCapacity;
+        }
     }
 
     /** RetryOptions includes retry lookup related options. */
@@ -282,6 +287,17 @@ public final class LookupJoinUtil {
         @Override
         public int hashCode() {
             return Objects.hash(retryPredicate, retryStrategy, retryFixedDelay, retryMaxAttempts);
+        }
+
+        @Override
+        public String toString() {
+            return retryPredicate
+                    + ", "
+                    + retryStrategy
+                    + ", "
+                    + retryFixedDelay
+                    + "ms, "
+                    + retryMaxAttempts;
         }
 
         public String getRetryPredicate() {
