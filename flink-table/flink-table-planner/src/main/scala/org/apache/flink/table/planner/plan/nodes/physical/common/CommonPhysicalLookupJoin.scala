@@ -112,29 +112,29 @@ abstract class CommonPhysicalLookupJoin(
         "e.g., ON T1.id = T2.id && pythonUdf(T1.a, T2.b)")
   }
 
-  val isAsyncEnabled = LookupJoinUtil.isAsyncLookup(
+  lazy val isAsyncEnabled = LookupJoinUtil.isAsyncLookup(
     temporalTable,
     allLookupKeys.keys.map(Int.box).toList.asJava,
     lookupHint.orNull,
     upsertMaterialize)
 
-  val retryOptions = Option.apply(LookupJoinUtil.RetryLookupOptions.fromJoinHint(lookupHint.orNull))
+  lazy val retryOptions =
+    Option.apply(LookupJoinUtil.RetryLookupOptions.fromJoinHint(lookupHint.orNull))
 
-  val inputChangelogMode = getInput match {
+  lazy val inputChangelogMode = getInput match {
     case streamPhysicalRel: StreamPhysicalRel =>
       ChangelogPlanUtils.getChangelogMode(streamPhysicalRel).getOrElse(ChangelogMode.insertOnly())
     case _ => ChangelogMode.insertOnly()
   }
 
-  val tableConfig = unwrapTableConfig(this);
+  lazy val tableConfig = unwrapTableConfig(this);
 
-  val asyncOptions = isAsyncEnabled match {
-    case true =>
-      Option.apply(
-        LookupJoinUtil.getMergedAsyncOptions(lookupHint.orNull, tableConfig, inputChangelogMode))
-    case false =>
-      // do not create asyncOptions if async is not enabled
-      Option.empty[AsyncLookupOptions]
+  lazy val asyncOptions = if (isAsyncEnabled) {
+    Option.apply(
+      LookupJoinUtil.getMergedAsyncOptions(lookupHint.orNull, tableConfig, inputChangelogMode))
+  } else {
+    // do not create asyncOptions if async is not enabled
+    Option.empty[AsyncLookupOptions]
   }
 
   override def deriveRowType(): RelDataType = {
