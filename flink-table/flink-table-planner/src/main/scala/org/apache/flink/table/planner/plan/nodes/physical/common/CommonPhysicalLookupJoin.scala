@@ -19,21 +19,24 @@ package org.apache.flink.table.planner.plan.nodes.physical.common
 
 import org.apache.flink.table.api.TableException
 import org.apache.flink.table.catalog.{ObjectIdentifier, UniqueConstraint}
+import org.apache.flink.table.connector.ChangelogMode
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory
 import org.apache.flink.table.planner.plan.nodes.FlinkRelNode
-import org.apache.flink.table.planner.plan.nodes.exec.spec.LookupJoinHintSpec
+import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalRel
 import org.apache.flink.table.planner.plan.schema.{IntermediateRelTable, LegacyTableSourceTable, TableSourceTable}
-import org.apache.flink.table.planner.plan.utils.{ExpressionFormat, JoinTypeUtil, LookupJoinUtil, RelExplainUtil}
+import org.apache.flink.table.planner.plan.utils.{ChangelogPlanUtils, ExpressionFormat, JoinTypeUtil, LookupJoinUtil, RelExplainUtil}
 import org.apache.flink.table.planner.plan.utils.ExpressionFormat.ExpressionFormat
 import org.apache.flink.table.planner.plan.utils.LookupJoinUtil._
 import org.apache.flink.table.planner.plan.utils.PythonUtil.containsPythonCall
 import org.apache.flink.table.planner.plan.utils.RelExplainUtil.preferExpressionFormat
+import org.apache.flink.table.planner.utils.ShortcutUtils.unwrapTableConfig
 import org.apache.flink.table.runtime.types.PlannerTypeUtils
 
 import org.apache.calcite.plan.{RelOptCluster, RelOptTable, RelTraitSet}
 import org.apache.calcite.rel.`type`.{RelDataType, RelDataTypeField}
 import org.apache.calcite.rel.{RelNode, RelWriter, SingleRel}
 import org.apache.calcite.rel.core.{JoinInfo, JoinRelType, TableScan}
+import org.apache.calcite.rel.hint.RelHint
 import org.apache.calcite.rex._
 import org.apache.calcite.sql.{SqlExplainLevel, SqlKind}
 import org.apache.calcite.sql.fun.SqlStdOperatorTable
@@ -83,7 +86,8 @@ abstract class CommonPhysicalLookupJoin(
     val calcOnTemporalTable: Option[RexProgram],
     val joinInfo: JoinInfo,
     val joinType: JoinRelType,
-    val lookupHintSpec: Option[LookupJoinHintSpec] = Option.empty[LookupJoinHintSpec])
+    val lookupHint: Option[RelHint] = Option.empty[RelHint],
+    val upsertMaterialize: Boolean = false)
   extends SingleRel(cluster, traitSet, inputRel)
   with FlinkRelNode {
 
@@ -106,6 +110,31 @@ abstract class CommonPhysicalLookupJoin(
       "Only inner join condition with equality predicates supports the " +
         "Python UDF taking the inputs from the left table and the right table at the same time, " +
         "e.g., ON T1.id = T2.id && pythonUdf(T1.a, T2.b)")
+  }
+
+  val isAsyncEnabled = LookupJoinUtil.isAsyncLookup(
+    temporalTable,
+    allLookupKeys.keys.map(Int.box).toList.asJava,
+    lookupHint.orNull,
+    upsertMaterialize)
+
+  val retryOptions = Option.apply(LookupJoinUtil.RetryLookupOptions.fromJoinHint(lookupHint.orNull))
+
+  val inputChangelogMode = getInput match {
+    case streamPhysicalRel: StreamPhysicalRel =>
+      ChangelogPlanUtils.getChangelogMode(streamPhysicalRel).getOrElse(ChangelogMode.insertOnly())
+    case _ => ChangelogMode.insertOnly()
+  }
+
+  val tableConfig = unwrapTableConfig(this);
+
+  val asyncOptions = isAsyncEnabled match {
+    case true =>
+      Option.apply(
+        LookupJoinUtil.getMergedAsyncOptions(lookupHint.orNull, tableConfig, inputChangelogMode))
+    case false =>
+      // do not create asyncOptions if async is not enabled
+      Option.empty[AsyncLookupOptions]
   }
 
   override def deriveRowType(): RelDataType = {
@@ -161,14 +190,6 @@ abstract class CommonPhysicalLookupJoin(
       case t: LegacyTableSourceTable[_] => t.tableIdentifier
     }
 
-    // The lookup function maybe not the final choice at runtime because lack of upsert materialize
-    // info here. This can be consistent after planner offers enough info here.
-    val isAsyncEnabled: Boolean =
-      LookupJoinUtil.isAsyncLookup(
-        temporalTable,
-        allLookupKeys.keys.map(Int.box).toList.asJava,
-        lookupHintSpec.orNull)
-
     super
       .explainTerms(pw)
       .item("table", tableIdentifier.asSummaryString())
@@ -185,6 +206,7 @@ abstract class CommonPhysicalLookupJoin(
           pw.getDetailLevel),
         remainingCondition.isDefined)
       .item("select", selection)
+      .itemIf("upsertMaterialize", "true", upsertMaterialize)
   }
 
   /** Gets the remaining join condition which is used */
