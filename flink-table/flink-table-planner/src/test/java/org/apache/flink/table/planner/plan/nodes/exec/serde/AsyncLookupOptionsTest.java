@@ -22,12 +22,17 @@ import org.apache.flink.streaming.api.datastream.AsyncDataStream;
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.connector.ChangelogMode;
+import org.apache.flink.table.planner.hint.JoinStrategy;
+import org.apache.flink.table.planner.hint.LookupJoinHintOptions;
 import org.apache.flink.table.planner.plan.nodes.exec.spec.LookupJoinHintTestUtil;
 import org.apache.flink.table.planner.plan.utils.LookupJoinUtil;
 
+import org.apache.calcite.rel.hint.RelHint;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.apache.flink.table.planner.plan.nodes.exec.serde.JsonSerdeTestUtil.testJsonRoundTrip;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -97,5 +102,28 @@ public class AsyncLookupOptionsTest {
                 asyncLookupOptions.asyncBufferCapacity
                         == ExecutionConfigOptions.TABLE_EXEC_ASYNC_LOOKUP_BUFFER_CAPACITY
                                 .defaultValue());
+
+        TableConfig userConf = TableConfig.getDefault();
+        userConf.set(
+                ExecutionConfigOptions.TABLE_EXEC_ASYNC_LOOKUP_OUTPUT_MODE,
+                ExecutionConfigOptions.AsyncOutputMode.ALLOW_UNORDERED);
+        userConf.set(ExecutionConfigOptions.TABLE_EXEC_ASYNC_LOOKUP_BUFFER_CAPACITY, 300);
+        Map<String, String> kvOptions = new HashMap<>();
+        kvOptions.put(LookupJoinHintOptions.ASYNC_LOOKUP.key(), "true");
+        kvOptions.put(LookupJoinHintOptions.ASYNC_CAPACITY.key(), "1000");
+        asyncLookupOptions =
+                LookupJoinUtil.getMergedAsyncOptions(
+                        RelHint.builder(JoinStrategy.LOOKUP.getJoinHintName())
+                                .hintOptions(kvOptions)
+                                .build(),
+                        userConf,
+                        ChangelogMode.insertOnly());
+        assertTrue(asyncLookupOptions.asyncOutputMode == AsyncDataStream.OutputMode.UNORDERED);
+        assertTrue(
+                asyncLookupOptions.asyncTimeout
+                        == ExecutionConfigOptions.TABLE_EXEC_ASYNC_LOOKUP_TIMEOUT
+                                .defaultValue()
+                                .toMillis());
+        assertTrue(asyncLookupOptions.asyncBufferCapacity == 1000);
     }
 }
