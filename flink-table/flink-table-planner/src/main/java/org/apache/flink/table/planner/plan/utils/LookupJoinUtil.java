@@ -77,6 +77,8 @@ import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rex.RexLiteral;
 
+import javax.annotation.Nullable;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -300,23 +302,7 @@ public final class LookupJoinUtil {
                     + retryMaxAttempts;
         }
 
-        public String getRetryPredicate() {
-            return retryPredicate;
-        }
-
-        public LookupJoinHintOptions.RetryStrategy getRetryStrategy() {
-            return retryStrategy;
-        }
-
-        public Long getRetryFixedDelay() {
-            return retryFixedDelay;
-        }
-
-        public Integer getRetryMaxAttempts() {
-            return retryMaxAttempts;
-        }
-
-        public static RetryLookupOptions fromJoinHint(RelHint lookupJoinHint) {
+        public static RetryLookupOptions fromJoinHint(@Nullable RelHint lookupJoinHint) {
             if (null != lookupJoinHint) {
                 Configuration conf = Configuration.fromMap(lookupJoinHint.kvOptions);
                 Duration fixedDelay = conf.get(FIXED_DELAY);
@@ -338,9 +324,9 @@ public final class LookupJoinUtil {
          * ResultRetryStrategy#NO_RETRY_STRATEGY} will return.
          */
         @JsonIgnore
+        @SuppressWarnings("unchecked")
         public ResultRetryStrategy toRetryStrategy() {
-            if (null == retryPredicate
-                    || !LookupJoinHintOptions.LOOKUP_MISS_PREDICATE.equalsIgnoreCase(retryPredicate)
+            if (!LookupJoinHintOptions.LOOKUP_MISS_PREDICATE.equalsIgnoreCase(retryPredicate)
                     || retryStrategy != LookupJoinHintOptions.RetryStrategy.FIXED_DELAY) {
                 return NO_RETRY_STRATEGY;
             }
@@ -389,20 +375,6 @@ public final class LookupJoinUtil {
     }
 
     /**
-     * Evaluates if prefer async lookup by given lookup {@link RelHint}. Returns true except async
-     * option in hint is false.
-     */
-    public static boolean preferAsync(RelHint lookupHint) {
-        // async option has no default value, prefer async except async option is false
-        if (null == lookupHint) {
-            return true;
-        }
-        Configuration conf = Configuration.fromMap(lookupHint.kvOptions);
-        Boolean async = conf.get(ASYNC_LOOKUP);
-        return null == async || async.booleanValue();
-    }
-
-    /**
      * This method determines whether async lookup is enabled according to the given lookup keys
      * with considering lookup {@link RelHint} and required upsertMaterialize. Note: it will not
      * create the function instance to avoid potential heavy cost during optimization phase. if
@@ -427,15 +399,15 @@ public final class LookupJoinUtil {
             RelHint lookupHint,
             boolean upsertMaterialize) {
         // prefer (not require) by default
-        boolean preferAsync = LookupJoinUtil.preferAsync(lookupHint);
+        boolean preferAsync = preferAsync(lookupHint);
         if (upsertMaterialize) {
             // upsertMaterialize only works on sync lookup mode, async lookup is unsupported.
             return false;
         }
         boolean syncFound = false;
         boolean asyncFound = false;
-        int[] lookupKeyIndicesInOrder = getOrderedLookupKeys(lookupKeys);
         if (temporalTable instanceof TableSourceTable) {
+            int[] lookupKeyIndicesInOrder = getOrderedLookupKeys(lookupKeys);
             LookupTableSource.LookupRuntimeProvider provider =
                     createLookupRuntimeProvider(temporalTable, lookupKeyIndicesInOrder);
             if (provider instanceof LookupFunctionProvider
@@ -446,8 +418,7 @@ public final class LookupJoinUtil {
                     || provider instanceof AsyncTableFunctionProvider) {
                 asyncFound = true;
             }
-        }
-        if (temporalTable instanceof LegacyTableSourceTable) {
+        } else if (temporalTable instanceof LegacyTableSourceTable) {
             LegacyTableSourceTable<?> legacyTableSourceTable =
                     (LegacyTableSourceTable<?>) temporalTable;
             LookupableTableSource<?> tableSource =
@@ -464,10 +435,7 @@ public final class LookupJoinUtil {
                             "table %s is neither TableSourceTable not LegacyTableSourceTable",
                             temporalTable.getQualifiedName()));
         }
-        if (preferAsync) {
-            return asyncFound ? true : false;
-        }
-        return syncFound ? false : true;
+        return preferAsync ? asyncFound : !syncFound;
     }
 
     /**
@@ -490,8 +458,7 @@ public final class LookupJoinUtil {
                             retryStrategy,
                             async,
                             classLoader);
-        }
-        if (temporalTable instanceof LegacyTableSourceTable) {
+        } else if (temporalTable instanceof LegacyTableSourceTable) {
             lookupFunction =
                     findLookupFunctionFromLegacySource(
                             (LegacyTableSourceTable<?>) temporalTable,
@@ -509,6 +476,20 @@ public final class LookupJoinUtil {
             throw new TableException(errorMsg.toString());
         }
         return lookupFunction;
+    }
+
+    /**
+     * Evaluates if prefer async lookup by given lookup {@link RelHint}. Returns true except async
+     * option in hint is false.
+     */
+    private static boolean preferAsync(@Nullable RelHint lookupHint) {
+        // async option has no default value, prefer async except async option is false
+        if (null == lookupHint) {
+            return true;
+        }
+        Configuration conf = Configuration.fromMap(lookupHint.kvOptions);
+        Boolean async = conf.get(ASYNC_LOOKUP);
+        return null == async || async;
     }
 
     private static <T> T coalesce(T t1, T t2) {

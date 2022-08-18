@@ -17,7 +17,7 @@
  */
 package org.apache.flink.table.planner.plan.nodes.physical.common
 
-import org.apache.flink.table.api.TableException
+import org.apache.flink.table.api.{TableConfig, TableException}
 import org.apache.flink.table.catalog.{ObjectIdentifier, UniqueConstraint}
 import org.apache.flink.table.connector.ChangelogMode
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory
@@ -112,24 +112,24 @@ abstract class CommonPhysicalLookupJoin(
         "e.g., ON T1.id = T2.id && pythonUdf(T1.a, T2.b)")
   }
 
-  lazy val isAsyncEnabled = LookupJoinUtil.isAsyncLookup(
+  lazy val isAsyncEnabled: Boolean = LookupJoinUtil.isAsyncLookup(
     temporalTable,
     allLookupKeys.keys.map(Int.box).toList.asJava,
     lookupHint.orNull,
     upsertMaterialize)
 
-  lazy val retryOptions =
+  lazy val retryOptions: Option[RetryLookupOptions] =
     Option.apply(LookupJoinUtil.RetryLookupOptions.fromJoinHint(lookupHint.orNull))
 
-  lazy val inputChangelogMode = getInput match {
+  lazy val inputChangelogMode: ChangelogMode = getInput match {
     case streamPhysicalRel: StreamPhysicalRel =>
       ChangelogPlanUtils.getChangelogMode(streamPhysicalRel).getOrElse(ChangelogMode.insertOnly())
     case _ => ChangelogMode.insertOnly()
   }
 
-  lazy val tableConfig = unwrapTableConfig(this);
+  lazy val tableConfig: TableConfig = unwrapTableConfig(this);
 
-  lazy val asyncOptions = if (isAsyncEnabled) {
+  lazy val asyncOptions: Option[AsyncLookupOptions] = if (isAsyncEnabled) {
     Option.apply(
       LookupJoinUtil.getMergedAsyncOptions(lookupHint.orNull, tableConfig, inputChangelogMode))
   } else {
