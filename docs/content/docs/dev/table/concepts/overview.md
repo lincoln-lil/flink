@@ -141,6 +141,7 @@ Where to go next?
 * [Time attributes]({{< ref "docs/dev/table/concepts/time_attributes" >}}): Explains time attributes and how time attributes are handled in Table API & SQL.
 * [Versioned Tables]({{< ref "docs/dev/table/concepts/versioned_tables" >}}): Describes the Temporal Table concept.
 * [Joins in Continuous Queries]({{< ref "docs/dev/table/sql/queries/joins" >}}): Different supported types of Joins in Continuous Queries.
+* [Determinism in Continuous Queries]({{< ref "docs/dev/table/concepts/determinism" >}}): 解释了计算的确定性。
 * [Query configuration]({{< ref "docs/dev/table/config" >}}): Lists Table API & SQL specific configuration options.
 
 {{< top >}}
