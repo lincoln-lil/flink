@@ -809,6 +809,149 @@ class TableSinkTest extends TableTestBase {
       .hasMessage(
         "Unsupported operation: org.apache.flink.table.operations.ddl.CreateTableASOperation")
   }
+
+  @Test
+  def debug(): Unit = {
+    val tEnv = util.tableEnv
+    // default config is auto
+    tEnv.getConfig.set(
+      ExecutionConfigOptions.TABLE_EXEC_SINK_KEYED_SHUFFLE,
+      ExecutionConfigOptions.SinkKeyedShuffle.AUTO)
+
+    tEnv.executeSql(
+      s"""
+         |CREATE TEMPORARY TABLE `dbo_Book` (
+         |  `_key_BookID` INT NOT NULL,
+         |  `before` ROW<`BookID` INT NOT NULL, `ParentBookID` INT, `BookTypeID` INT NOT NULL, `Code` VARCHAR(2147483647) NOT NULL, `CodeDate` BIGINT NOT NULL, `Name` VARCHAR(2147483647) NOT NULL, `TodaysPandL` VARCHAR(2147483647) NOT NULL, `YestPandL` VARCHAR(2147483647) NOT NULL, `MTDPandL` VARCHAR(2147483647) NOT NULL, `YTDPandL` VARCHAR(2147483647) NOT NULL, `UnrealisedPandL` VARCHAR(2147483647) NOT NULL, `CCY` VARCHAR(2147483647) NOT NULL, `FinancialYear` BIGINT NOT NULL, `Show` INT NOT NULL, `CheckPositions` INT NOT NULL, `CheckUnRealisedYearEnd` INT NOT NULL, `SortOrder` INT NOT NULL, `Depth` INT NOT NULL, `NetBookSize` VARCHAR(2147483647) NOT NULL, `NetFundSize` VARCHAR(2147483647) NOT NULL, `LongPosition` VARCHAR(2147483647) NOT NULL, `LongExposure` VARCHAR(2147483647) NOT NULL, `LongBeta60` VARCHAR(2147483647) NOT NULL, `LongBeta90` VARCHAR(2147483647) NOT NULL, `LongBeta180` VARCHAR(2147483647) NOT NULL, `ShortPosition` VARCHAR(2147483647) NOT NULL, `ShortExposure` VARCHAR(2147483647) NOT NULL, `ShortBeta60` VARCHAR(2147483647) NOT NULL, `ShortBeta90` VARCHAR(2147483647) NOT NULL, `ShortBeta180` VARCHAR(2147483647) NOT NULL, `TodaysValueAdded` VARCHAR(2147483647) NOT NULL, `CodeBeta` VARCHAR(2147483647), `CodeOMS` VARCHAR(2147483647), `CodeOMSSub` VARCHAR(2147483647), `CodeFundSize` VARCHAR(2147483647), `MaxPositionPerCent` VARCHAR(2147483647), `CapitalAllocation` VARCHAR(2147483647), `OptionExposure` VARCHAR(2147483647), `DaysToClose` VARCHAR(2147483647), `ProcessOrder` INT NOT NULL, `BackgroundColour` VARCHAR(2147483647), `TradableUntil` BIGINT, `BookStatus` VARCHAR(2147483647) NOT NULL, `SectorCode` VARCHAR(2147483647), `CountryCode` VARCHAR(2147483647), `FuturePandL` VARCHAR(2147483647) NOT NULL, `LayoutGridIdView` VARCHAR(2147483647), `AsAtDate` BIGINT, `PreTodayMTDPct` VARCHAR(2147483647) NOT NULL, `CalcMethod` VARCHAR(2147483647) NOT NULL, `Dissag_FundId` INT, `PrimaryTradingLocation` VARCHAR(2147483647), `TOPSScaling` BOOLEAN NOT NULL, `BookShortName` VARCHAR(2147483647), `RiskBookSizeSourceId` INT, `SourceType` VARCHAR(2147483647) NOT NULL, `FCPBookSize` VARCHAR(2147483647) NOT NULL, `DealingDateBookSize` VARCHAR(2147483647), `DealingDateFundSize` VARCHAR(2147483647), `BaseCCY` VARCHAR(2147483647) NOT NULL, `CalcBaseCcy` BOOLEAN NOT NULL, `StrategyTemplateId` INT, `SubStrategyTemplateId` INT, `AssetAllocFundId` INT, `DisplayFlag` BIGINT, `IncludeInFuturesRoll` BOOLEAN NOT NULL, `NetExposure` VARCHAR(2147483647) NOT NULL, `GrossExposure` VARCHAR(2147483647) NOT NULL, `BaseNetExposure` VARCHAR(2147483647) NOT NULL, `BaseGrossExposure` VARCHAR(2147483647) NOT NULL, `CYTD` VARCHAR(2147483647) NOT NULL, `recTimeStamp` BIGINT, `IsGNME` BOOLEAN NOT NULL, `IsFX` BOOLEAN NOT NULL, `PFYTD` VARCHAR(2147483647) NOT NULL, `DealingDate` INT, `Tplus1BookSize` VARCHAR(2147483647) NOT NULL, `MTDReturn` VARCHAR(2147483647), `EmbeddedFXPandL` VARCHAR(2147483647) NOT NULL, `IsUnHedged` BOOLEAN NOT NULL, `RiskBookSize` VARCHAR(2147483647), `TodaysLongPandL` VARCHAR(2147483647) NOT NULL, `TodaysShortPandL` VARCHAR(2147483647) NOT NULL, `CovidExposure` VARCHAR(2147483647) NOT NULL, `ManualNameOverride` BOOLEAN NOT NULL>,
+         |  `after` ROW<`BookID` INT NOT NULL, `ParentBookID` INT, `BookTypeID` INT NOT NULL, `Code` VARCHAR(2147483647) NOT NULL, `CodeDate` BIGINT NOT NULL, `Name` VARCHAR(2147483647) NOT NULL, `TodaysPandL` VARCHAR(2147483647) NOT NULL, `YestPandL` VARCHAR(2147483647) NOT NULL, `MTDPandL` VARCHAR(2147483647) NOT NULL, `YTDPandL` VARCHAR(2147483647) NOT NULL, `UnrealisedPandL` VARCHAR(2147483647) NOT NULL, `CCY` VARCHAR(2147483647) NOT NULL, `FinancialYear` BIGINT NOT NULL, `Show` INT NOT NULL, `CheckPositions` INT NOT NULL, `CheckUnRealisedYearEnd` INT NOT NULL, `SortOrder` INT NOT NULL, `Depth` INT NOT NULL, `NetBookSize` VARCHAR(2147483647) NOT NULL, `NetFundSize` VARCHAR(2147483647) NOT NULL, `LongPosition` VARCHAR(2147483647) NOT NULL, `LongExposure` VARCHAR(2147483647) NOT NULL, `LongBeta60` VARCHAR(2147483647) NOT NULL, `LongBeta90` VARCHAR(2147483647) NOT NULL, `LongBeta180` VARCHAR(2147483647) NOT NULL, `ShortPosition` VARCHAR(2147483647) NOT NULL, `ShortExposure` VARCHAR(2147483647) NOT NULL, `ShortBeta60` VARCHAR(2147483647) NOT NULL, `ShortBeta90` VARCHAR(2147483647) NOT NULL, `ShortBeta180` VARCHAR(2147483647) NOT NULL, `TodaysValueAdded` VARCHAR(2147483647) NOT NULL, `CodeBeta` VARCHAR(2147483647), `CodeOMS` VARCHAR(2147483647), `CodeOMSSub` VARCHAR(2147483647), `CodeFundSize` VARCHAR(2147483647), `MaxPositionPerCent` VARCHAR(2147483647), `CapitalAllocation` VARCHAR(2147483647), `OptionExposure` VARCHAR(2147483647), `DaysToClose` VARCHAR(2147483647), `ProcessOrder` INT NOT NULL, `BackgroundColour` VARCHAR(2147483647), `TradableUntil` BIGINT, `BookStatus` VARCHAR(2147483647) NOT NULL, `SectorCode` VARCHAR(2147483647), `CountryCode` VARCHAR(2147483647), `FuturePandL` VARCHAR(2147483647) NOT NULL, `LayoutGridIdView` VARCHAR(2147483647), `AsAtDate` BIGINT, `PreTodayMTDPct` VARCHAR(2147483647) NOT NULL, `CalcMethod` VARCHAR(2147483647) NOT NULL, `Dissag_FundId` INT, `PrimaryTradingLocation` VARCHAR(2147483647), `TOPSScaling` BOOLEAN NOT NULL, `BookShortName` VARCHAR(2147483647), `RiskBookSizeSourceId` INT, `SourceType` VARCHAR(2147483647) NOT NULL, `FCPBookSize` VARCHAR(2147483647) NOT NULL, `DealingDateBookSize` VARCHAR(2147483647), `DealingDateFundSize` VARCHAR(2147483647), `BaseCCY` VARCHAR(2147483647) NOT NULL, `CalcBaseCcy` BOOLEAN NOT NULL, `StrategyTemplateId` INT, `SubStrategyTemplateId` INT, `AssetAllocFundId` INT, `DisplayFlag` BIGINT, `IncludeInFuturesRoll` BOOLEAN NOT NULL, `NetExposure` VARCHAR(2147483647) NOT NULL, `GrossExposure` VARCHAR(2147483647) NOT NULL, `BaseNetExposure` VARCHAR(2147483647) NOT NULL, `BaseGrossExposure` VARCHAR(2147483647) NOT NULL, `CYTD` VARCHAR(2147483647) NOT NULL, `recTimeStamp` BIGINT, `IsGNME` BOOLEAN NOT NULL, `IsFX` BOOLEAN NOT NULL, `PFYTD` VARCHAR(2147483647) NOT NULL, `DealingDate` INT, `Tplus1BookSize` VARCHAR(2147483647) NOT NULL, `MTDReturn` VARCHAR(2147483647), `EmbeddedFXPandL` VARCHAR(2147483647) NOT NULL, `IsUnHedged` BOOLEAN NOT NULL, `RiskBookSize` VARCHAR(2147483647), `TodaysLongPandL` VARCHAR(2147483647) NOT NULL, `TodaysShortPandL` VARCHAR(2147483647) NOT NULL, `CovidExposure` VARCHAR(2147483647) NOT NULL, `ManualNameOverride` BOOLEAN NOT NULL>,
+         |  `source` ROW<`version` VARCHAR(2147483647) NOT NULL, `connector` VARCHAR(2147483647) NOT NULL, `name` VARCHAR(2147483647) NOT NULL, `ts_ms` BIGINT NOT NULL, `snapshot` VARCHAR(2147483647), `db` VARCHAR(2147483647) NOT NULL, `sequence` VARCHAR(2147483647), `schema` VARCHAR(2147483647) NOT NULL, `table` VARCHAR(2147483647) NOT NULL, `commit_version` BIGINT, `transaction_finished` BOOLEAN NOT NULL> NOT NULL,
+         |  `op` VARCHAR(2147483647) NOT NULL,
+         |  `ts_ms` BIGINT,
+         |  `transaction` ROW<`id` VARCHAR(2147483647) NOT NULL, `total_order` BIGINT NOT NULL, `data_collection_order` BIGINT NOT NULL>,
+         |  PRIMARY KEY (`_key_BookID`) NOT ENFORCED
+         |) with ('connector'='values', 'bounded'='false', 'changelog-mode'='UA,I,D')
+         |""".stripMargin)
+
+    tEnv.executeSql(
+      s"""
+         |CREATE TEMPORARY TABLE `dbo_BookData` (
+         |  `_key_BookID` INT NOT NULL,
+         |  `_key_IsBaseCcy` BOOLEAN NOT NULL,
+         |  `_key_IsDisplayCcy` BOOLEAN NOT NULL,
+         |  `_key_Ccy` VARCHAR(2147483647) NOT NULL,
+         |  `before` ROW<`BookID` INT NOT NULL, `Ccy` VARCHAR(2147483647) NOT NULL, `IsBaseCcy` BOOLEAN NOT NULL, `IsDisplayCcy` BOOLEAN NOT NULL, `TodaysPandL` VARCHAR(2147483647) NOT NULL, `YestPandL` VARCHAR(2147483647) NOT NULL, `MTDPandL` VARCHAR(2147483647) NOT NULL, `YTDPandL` VARCHAR(2147483647) NOT NULL, `TodaysFXPandL` VARCHAR(2147483647) NOT NULL, `YestFXPandL` VARCHAR(2147483647) NOT NULL, `MTDFXPandL` VARCHAR(2147483647) NOT NULL, `YTDFXPandL` VARCHAR(2147483647) NOT NULL, `FuturePandL` VARCHAR(2147483647) NOT NULL, `LongPosition` VARCHAR(2147483647) NOT NULL, `LongExposure` VARCHAR(2147483647) NOT NULL, `ShortPosition` VARCHAR(2147483647) NOT NULL, `ShortExposure` VARCHAR(2147483647) NOT NULL, `OptionExposure` VARCHAR(2147483647), `CapitalAllocation` VARCHAR(2147483647), `TodaysValueAdded` VARCHAR(2147483647) NOT NULL, `PreTodayMTDPct` VARCHAR(2147483647) NOT NULL, `NetBookSize` VARCHAR(2147483647) NOT NULL, `NetFundSize` VARCHAR(2147483647) NOT NULL, `FCPBookSize` VARCHAR(2147483647) NOT NULL, `DealingDateBookSize` VARCHAR(2147483647), `DealingDateFundSize` VARCHAR(2147483647), `NetExposure` VARCHAR(2147483647) NOT NULL, `GrossExposure` VARCHAR(2147483647) NOT NULL, `CYTD` VARCHAR(2147483647) NOT NULL, `GNME` VARCHAR(2147483647), `GNMEFX` VARCHAR(2147483647), `RiskGrossMarketExposure` VARCHAR(2147483647) NOT NULL, `ConsolidatedGrossMarketExposure` VARCHAR(2147483647) NOT NULL, `ConsolidatedNettedGrossMarketExposure` VARCHAR(2147483647) NOT NULL, `GrossExposureFX` VARCHAR(2147483647) NOT NULL, `PFYTD` VARCHAR(2147483647) NOT NULL, `EmbeddedFXPandL` VARCHAR(2147483647) NOT NULL, `RiskBookSize` VARCHAR(2147483647), `OverrrideDisplayBookSize` VARCHAR(2147483647), `LongBetaExposure` VARCHAR(2147483647) NOT NULL, `ShortBetaExposure` VARCHAR(2147483647) NOT NULL, `TodaysLongPandL` VARCHAR(2147483647) NOT NULL, `TodaysShortPandL` VARCHAR(2147483647) NOT NULL, `CovidExposure` VARCHAR(2147483647) NOT NULL, `MTDReturn` VARCHAR(2147483647), `LongEquityBetaExposure` VARCHAR(2147483647) NOT NULL, `ShortEquityBetaExposure` VARCHAR(2147483647) NOT NULL>,
+         |  `after` ROW<`BookID` INT NOT NULL, `Ccy` VARCHAR(2147483647) NOT NULL, `IsBaseCcy` BOOLEAN NOT NULL, `IsDisplayCcy` BOOLEAN NOT NULL, `TodaysPandL` VARCHAR(2147483647) NOT NULL, `YestPandL` VARCHAR(2147483647) NOT NULL, `MTDPandL` VARCHAR(2147483647) NOT NULL, `YTDPandL` VARCHAR(2147483647) NOT NULL, `TodaysFXPandL` VARCHAR(2147483647) NOT NULL, `YestFXPandL` VARCHAR(2147483647) NOT NULL, `MTDFXPandL` VARCHAR(2147483647) NOT NULL, `YTDFXPandL` VARCHAR(2147483647) NOT NULL, `FuturePandL` VARCHAR(2147483647) NOT NULL, `LongPosition` VARCHAR(2147483647) NOT NULL, `LongExposure` VARCHAR(2147483647) NOT NULL, `ShortPosition` VARCHAR(2147483647) NOT NULL, `ShortExposure` VARCHAR(2147483647) NOT NULL, `OptionExposure` VARCHAR(2147483647), `CapitalAllocation` VARCHAR(2147483647), `TodaysValueAdded` VARCHAR(2147483647) NOT NULL, `PreTodayMTDPct` VARCHAR(2147483647) NOT NULL, `NetBookSize` VARCHAR(2147483647) NOT NULL, `NetFundSize` VARCHAR(2147483647) NOT NULL, `FCPBookSize` VARCHAR(2147483647) NOT NULL, `DealingDateBookSize` VARCHAR(2147483647), `DealingDateFundSize` VARCHAR(2147483647), `NetExposure` VARCHAR(2147483647) NOT NULL, `GrossExposure` VARCHAR(2147483647) NOT NULL, `CYTD` VARCHAR(2147483647) NOT NULL, `GNME` VARCHAR(2147483647), `GNMEFX` VARCHAR(2147483647), `RiskGrossMarketExposure` VARCHAR(2147483647) NOT NULL, `ConsolidatedGrossMarketExposure` VARCHAR(2147483647) NOT NULL, `ConsolidatedNettedGrossMarketExposure` VARCHAR(2147483647) NOT NULL, `GrossExposureFX` VARCHAR(2147483647) NOT NULL, `PFYTD` VARCHAR(2147483647) NOT NULL, `EmbeddedFXPandL` VARCHAR(2147483647) NOT NULL, `RiskBookSize` VARCHAR(2147483647), `OverrrideDisplayBookSize` VARCHAR(2147483647), `LongBetaExposure` VARCHAR(2147483647) NOT NULL, `ShortBetaExposure` VARCHAR(2147483647) NOT NULL, `TodaysLongPandL` VARCHAR(2147483647) NOT NULL, `TodaysShortPandL` VARCHAR(2147483647) NOT NULL, `CovidExposure` VARCHAR(2147483647) NOT NULL, `MTDReturn` VARCHAR(2147483647), `LongEquityBetaExposure` VARCHAR(2147483647) NOT NULL, `ShortEquityBetaExposure` VARCHAR(2147483647) NOT NULL>,
+         |  `source` ROW<`version` VARCHAR(2147483647) NOT NULL, `connector` VARCHAR(2147483647) NOT NULL, `name` VARCHAR(2147483647) NOT NULL, `ts_ms` BIGINT NOT NULL, `snapshot` VARCHAR(2147483647), `db` VARCHAR(2147483647) NOT NULL, `sequence` VARCHAR(2147483647), `schema` VARCHAR(2147483647) NOT NULL, `table` VARCHAR(2147483647) NOT NULL, `commit_version` BIGINT, `transaction_finished` BOOLEAN NOT NULL> NOT NULL,
+         |  `op` VARCHAR(2147483647) NOT NULL,
+         |  `ts_ms` BIGINT,
+         |  `transaction` ROW<`id` VARCHAR(2147483647) NOT NULL, `total_order` BIGINT NOT NULL, `data_collection_order` BIGINT NOT NULL>,
+         |  PRIMARY KEY (`_key_BookID`, `_key_IsBaseCcy`, `_key_IsDisplayCcy`, `_key_Ccy`) NOT ENFORCED
+         |) with ('connector'='values', 'bounded'='false', 'changelog-mode'='UA,I,D')
+         |""".stripMargin)
+    tEnv.executeSql(
+      s"""
+         |CREATE TEMPORARY TABLE `Static_Book` (
+         |  `_key_BookId` INT NOT NULL,
+         |  `before` ROW<`BookId` INT NOT NULL, `Name` VARCHAR(2147483647) NOT NULL, `Code` VARCHAR(2147483647) NOT NULL, `BookTypeId` INT NOT NULL, `CCY` VARCHAR(2147483647) NOT NULL, `BaseCCY` VARCHAR(2147483647) NOT NULL, `BenchmarkId` INT, `RiskModelId` INT, `CodeOMS` VARCHAR(2147483647), `CodeOMSSub` VARCHAR(2147483647), `TradableUntil` INT, `SectorCode` VARCHAR(2147483647), `CountryCode` VARCHAR(2147483647), `CalcMethod` VARCHAR(2147483647), `BookHierarchyBreadCrumb` VARCHAR(2147483647), `Dissag_FundId` INT, `AAFundId` INT, `AASubStrategyId` INT, `AAStrategyId` INT, `DisplayFlag` BIGINT, `IsGNME` BOOLEAN NOT NULL, `IsFX` BOOLEAN NOT NULL, `IsActive` BOOLEAN, `RecTimeStamp` BIGINT NOT NULL>,
+         |  `after` ROW<`BookId` INT NOT NULL, `Name` VARCHAR(2147483647) NOT NULL, `Code` VARCHAR(2147483647) NOT NULL, `BookTypeId` INT NOT NULL, `CCY` VARCHAR(2147483647) NOT NULL, `BaseCCY` VARCHAR(2147483647) NOT NULL, `BenchmarkId` INT, `RiskModelId` INT, `CodeOMS` VARCHAR(2147483647), `CodeOMSSub` VARCHAR(2147483647), `TradableUntil` INT, `SectorCode` VARCHAR(2147483647), `CountryCode` VARCHAR(2147483647), `CalcMethod` VARCHAR(2147483647), `BookHierarchyBreadCrumb` VARCHAR(2147483647), `Dissag_FundId` INT, `AAFundId` INT, `AASubStrategyId` INT, `AAStrategyId` INT, `DisplayFlag` BIGINT, `IsGNME` BOOLEAN NOT NULL, `IsFX` BOOLEAN NOT NULL, `IsActive` BOOLEAN, `RecTimeStamp` BIGINT NOT NULL>,
+         |  `source` ROW<`version` VARCHAR(2147483647) NOT NULL, `connector` VARCHAR(2147483647) NOT NULL, `name` VARCHAR(2147483647) NOT NULL, `ts_ms` BIGINT NOT NULL, `snapshot` VARCHAR(2147483647), `db` VARCHAR(2147483647) NOT NULL, `sequence` VARCHAR(2147483647), `schema` VARCHAR(2147483647) NOT NULL, `table` VARCHAR(2147483647) NOT NULL, `commit_version` BIGINT, `transaction_finished` BOOLEAN NOT NULL> NOT NULL,
+         |  `op` VARCHAR(2147483647) NOT NULL,
+         |  `ts_ms` BIGINT,
+         |  `transaction` ROW<`id` VARCHAR(2147483647) NOT NULL, `total_order` BIGINT NOT NULL, `data_collection_order` BIGINT NOT NULL>,
+         |  PRIMARY KEY (`_key_BookId`) NOT ENFORCED
+         |)  with ('connector'='values', 'bounded'='false', 'changelog-mode'='UA,I,D')
+         |""".stripMargin)
+    tEnv.executeSql(
+      s"""
+         |CREATE TEMPORARY TABLE book_data_sink (
+         |  `_key_BookID` INT NOT NULL,
+         |  `_key_IsBaseCcy` BOOLEAN NOT NULL,
+         |  `_key_IsDisplayCcy` BOOLEAN NOT NULL,
+         |  `_key_Ccy` VARCHAR(2147483647) NOT NULL,
+         |  `NetBookSize` DOUBLE NOT NULL,
+         |  `RiskBookSize` DOUBLE NOT NULL,
+         |  `PFYTD` DOUBLE NOT NULL,
+         |  `PreTodayMTDPct` DOUBLE NOT NULL,
+         |  `SectorCode` VARCHAR(2147483647),
+         |  `CountryCode` VARCHAR(2147483647),
+         |  `RegionCode` VARCHAR(2147483647),
+         |  -- `BenchmarkIds` ARRAY<INT NOT NULL> NOT NULL,
+         |  -- `RiskModels` ARRAY<ROW<`RiskModelId` INT NOT NULL, `ModelDescription` VARCHAR(2147483647) NOT NULL, `Provider` VARCHAR(2147483647), `ModelRegion` VARCHAR(2147483647), `RegionShortName` VARCHAR(2147483647)> NOT NULL> NOT NULL,
+         |  `CalculationTimestamp` BIGINT,
+         |  PRIMARY KEY (`_key_BookID`, `_key_IsBaseCcy`, `_key_IsDisplayCcy`, `_key_Ccy`) NOT ENFORCED
+         |)
+         |COMMENT 'topic: onebook.aggregate.book-data-test, key: string, value: v1, upsert'
+         |WITH (
+         |  'connector' = 'print'
+         |);
+         |""".stripMargin)
+
+    util.verifyExecPlanInsert(
+      s"""INSERT INTO book_data_sink
+         |SELECT      _key_BookID,
+         |            _key_IsBaseCcy,
+         |            _key_IsDisplayCcy,
+         |            _key_Ccy,
+         |            0 NetBookSize,
+         |            0 RiskBookSize,
+         |            0 PFYTD,
+         |            0 PreTodayMTDPct,
+         |            '' SectorCode,
+         |            '' CountryCode,
+         |            '' RegionCode,
+         |            -- MultiSetToArray(COLLECT(0)) BenchmarkIds,
+         |            -- MultiSetToArray
+         |            -- (
+         |            --     COLLECT
+         |            --     (
+         |            --         CASE WHEN RiskModelId IS NULL
+         |            --             THEN CAST(NULL AS ROW<RiskModelId INT, ModelDescription STRING, Provider STRING, ModelRegion STRING, RegionShortName STRING>)
+         |            --             ELSE ROW(RiskModelId, ModelDescription, Provider, ModelRegion, RegionShortName)
+         |            --         END
+         |            --     )
+         |            -- ) RiskModels,
+         |            UNIX_TIMESTAMP() CalculationTimestamp
+         |FROM        (
+         |-- CREATE TEMPORARY VIEW book_data AS
+         |    SELECT      b._key_BookID,
+         |            COALESCE(bd._key_IsBaseCcy, false) _key_IsBaseCcy,
+         |            COALESCE(bd._key_IsDisplayCcy, true) _key_IsDisplayCcy,
+         |            COALESCE(bd._key_Ccy, 'USD') _key_Ccy,
+         |            sb.after.RiskModelId,
+         |            '' ModelDescription, '' Provider, '' ModelRegion, '' RegionShortName
+         |    FROM        (
+         |-- CREATE TEMPORARY VIEW dbo_book AS
+         |        SELECT * FROM `dbo_Book`
+         |        WHERE _key_BookID = 2600
+         |
+         |    ) b
+         |    JOIN    (
+         |-- CREATE TEMPORARY VIEW static_book AS
+         |    SELECT  *
+         |    FROM    `Static_Book`
+         |    WHERE   after.IsActive = true
+         |        AND _key_BookId = 2600
+         |    ) sb
+         |        ON      sb._key_BookId = b._key_BookID
+         |    LEFT JOIN  (
+         |
+         |-- CREATE TEMPORARY VIEW dbo_book_data AS
+         |    SELECT  *
+         |    FROM    `dbo_BookData`
+         |    WHERE   _key_IsDisplayCcy = true
+         |        AND _key_IsBaseCcy = false
+         |        AND _key_BookID = 2600
+         |
+         |) bd
+         |  ON      bd._key_BookID = b._key_BookID
+         |) b
+         |GROUP BY    _key_BookID,
+         |            _key_IsBaseCcy,
+         |            _key_IsDisplayCcy,
+         |            _key_Ccy
+         |""".stripMargin)
+  }
+
 }
 
 /** tests table factory use ParallelSourceFunction which support parallelism by env */
